@@ -25,19 +25,19 @@ For pnpm, use `pnpm install` and `pnpm dev`. The dedicated demo database fills i
 
 All accounts are fictional and use the same development-only password: `KishanBhaiya@2026`.
 
-| Role | Email |
-|---|---|
-| Individual buyer | `consumer@kishanbhaiya.demo` |
-| Business buyer | `buyer@kishanbhaiya.demo` |
-| Approved farmer | `farmer@kishanbhaiya.demo` |
-| Approved FPO manager | `fpo@kishanbhaiya.demo` |
-| Active driver | `driver.active@kishanbhaiya.demo` |
-| Active fleet partner | `fleet@kishanbhaiya.demo` |
-| Pending farmer | `pending.farmer@kishanbhaiya.demo` |
-| Changes-requested FPO | `pending.fpo@kishanbhaiya.demo` |
-| Pending driver | `driver@kishanbhaiya.demo` |
-| Logistics operator | `logistics@kishanbhaiya.demo` |
-| Verification/operations admin | `admin@kishanbhaiya.demo` |
+| Role                          | Email                              |
+| ----------------------------- | ---------------------------------- |
+| Individual buyer              | `consumer@kishanbhaiya.demo`       |
+| Business buyer                | `buyer@kishanbhaiya.demo`          |
+| Approved farmer               | `farmer@kishanbhaiya.demo`         |
+| Approved FPO manager          | `fpo@kishanbhaiya.demo`            |
+| Active driver                 | `driver.active@kishanbhaiya.demo`  |
+| Active fleet partner          | `fleet@kishanbhaiya.demo`          |
+| Pending farmer                | `pending.farmer@kishanbhaiya.demo` |
+| Changes-requested FPO         | `pending.fpo@kishanbhaiya.demo`    |
+| Pending driver                | `driver@kishanbhaiya.demo`         |
+| Logistics operator            | `logistics@kishanbhaiya.demo`      |
+| Verification/operations admin | `admin@kishanbhaiya.demo`          |
 
 Never use these credentials outside local development.
 
@@ -93,22 +93,22 @@ The matching weights are centralized in `server/src/services/matching.js`. The r
 
 All endpoints live under `/api/v1` and respond as `{ success, data, meta? }` or `{ success: false, error }`.
 
-| Domain | Endpoints |
-|---|---|
-| Auth | `POST /auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout`; `GET/PATCH /auth/me`; profile image upload/removal |
-| Verification | `GET /auth/verification`, `POST /auth/verification/documents`, `/auth/verification/submit`; `GET /admin/verifications`, `PATCH /admin/verifications/:id/review` |
-| Marketplace | `GET/POST /products`, `GET /products/:id/related`, `GET /sellers/:id`, `GET /lots`, `/marketplace/surplus`, `/price-intelligence/:productId` |
-| Uploads | Public/profile images use validated JPG/PNG/WebP up to 5 MB; verification evidence uses private PDF/image storage up to 10 MB and never exposes file keys publicly |
-| Retail | `POST /orders`, `GET /orders`, `GET /orders/:id` |
-| Procurement | `GET/POST /bulk-requirements`, `GET /:id/matches`, `GET/POST /:id/quotations` |
-| Negotiation | `GET /quotations/:id`, `POST /counter`, `/accept`, `/reject` |
-| Multi-seller | `POST /bulk-requirements/:id/fulfillment-plans/accept` creates supplier reservations and auto-planned shipments |
-| Pre-harvest | `GET/POST /expected-harvests`, `POST /:id/reservations`, `POST /:id/convert` |
-| Rescue | `POST /lots/:id/rescue-offers` |
-| FPO | `GET /fpo/members`, `POST /fpo/aggregations`, `GET /fpo/settlements` |
-| Logistics | `GET /shipments`, `POST /:id/dispatch`, `/start`, `/optimize`, `/stops/:stop/complete`, `/issues`, `/proof-of-pickup`, `/proof-of-delivery` |
-| Recurring | `GET/POST/PATCH /recurring-requirements` |
-| Trust | `GET/POST /disputes`, `PATCH /disputes/:id`, `GET /admin/audit` |
+| Domain       | Endpoints                                                                                                                                                          |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Auth         | `POST /auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout`; `GET/PATCH /auth/me`; profile image upload/removal                                          |
+| Verification | `GET /auth/verification`, `POST /auth/verification/documents`, `/auth/verification/submit`; `GET /admin/verifications`, `PATCH /admin/verifications/:id/review`    |
+| Marketplace  | `GET/POST /products`, `GET /products/:id/related`, `GET /sellers/:id`, `GET /lots`, `/marketplace/surplus`, `/price-intelligence/:productId`                       |
+| Uploads      | Public/profile images use validated JPG/PNG/WebP up to 5 MB; verification evidence uses private PDF/image storage up to 10 MB and never exposes file keys publicly |
+| Retail       | `POST /orders`, `GET /orders`, `GET /orders/:id`                                                                                                                   |
+| Procurement  | `GET/POST /bulk-requirements`, `GET /:id/matches`, `GET/POST /:id/quotations`                                                                                      |
+| Negotiation  | `GET /quotations/:id`, `POST /counter`, `/accept`, `/reject`                                                                                                       |
+| Multi-seller | `POST /bulk-requirements/:id/fulfillment-plans/accept` creates supplier reservations and auto-planned shipments                                                    |
+| Pre-harvest  | `GET/POST /expected-harvests`, `POST /:id/reservations`, `POST /:id/convert`                                                                                       |
+| Rescue       | `POST /lots/:id/rescue-offers`                                                                                                                                     |
+| FPO          | `GET /fpo/members`, `POST /fpo/aggregations`, `GET /fpo/settlements`                                                                                               |
+| Logistics    | `GET /shipments`, `POST /:id/dispatch`, `/start`, `/optimize`, `/stops/:stop/complete`, `/issues`, `/proof-of-pickup`, `/proof-of-delivery`                        |
+| Recurring    | `GET/POST/PATCH /recurring-requirements`                                                                                                                           |
+| Trust        | `GET/POST /disputes`, `PATCH /disputes/:id`, `GET /admin/audit`                                                                                                    |
 
 Mutation routes use Zod validation where structured input is required, role checks, server-side totals and inventory checks, plus audit records for high-impact actions. In a production replica set, the quotation-acceptance service boundary is the place to wrap reservation and order creation in a MongoDB transaction.
 
