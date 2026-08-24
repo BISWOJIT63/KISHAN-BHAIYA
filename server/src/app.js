@@ -7,11 +7,10 @@ import rateLimit from "express-rate-limit";
 import { env } from "./config/env.js";
 import { optionalAuth } from "./middleware/auth.js";
 import { errorHandler, notFound } from "./middleware/errors.js";
+import { publicUploadDir } from "./middleware/upload.js";
 import api from "./routes/api.js";
-import path from "path";
-import { fileURLToPath } from "url";
 
-export const createApp = () => {
+export const createApp = ({ initialize } = {}) => {
   const app = express();
   app.disable("x-powered-by");
   app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
@@ -27,7 +26,7 @@ export const createApp = () => {
   app.use(
     "/uploads",
     express.static(
-      path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../uploads"),
+      publicUploadDir,
       { maxAge: env.nodeEnv === "production" ? "1d" : 0 },
     ),
   );
@@ -41,6 +40,11 @@ export const createApp = () => {
       legacyHeaders: false,
     }),
   );
+  if (initialize) {
+    app.use((req, res, next) => {
+      Promise.resolve(initialize()).then(() => next(), next);
+    });
+  }
   app.use("/api/v1", optionalAuth, api);
   app.use(notFound);
   app.use(errorHandler);

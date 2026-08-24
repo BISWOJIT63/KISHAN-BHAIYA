@@ -17,6 +17,17 @@ npm run dev
 
 Open `http://localhost:5173`. The API runs on `http://localhost:5000`.
 
+## Vercel deployment
+
+Deploy the frontend and API as two Vercel projects from the same repository:
+
+1. Create an API project with **Root Directory** set to `server`. Vercel detects `src/index.js`, which exports the Express application as a serverless function. Do not set a start command or deploy `src/server.js` as the function entry point.
+2. In the API project's Production (and Preview, if needed) environment variables, set `NODE_ENV=production`, `MONGODB_URI`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `CRON_SECRET`, `CLIENT_URL`, `ALLOW_MEMORY_FALLBACK=false`, and `AUTO_SEED_DEMO=false`. `CLIENT_URL` must be the HTTPS URL of the frontend Vercel project.
+3. Create a frontend project with **Root Directory** set to `client`. Add `VITE_API_URL=https://<your-api-project>.vercel.app/api/v1`, then redeploy the frontend.
+4. The included `server/vercel.json` invokes the freshness job once daily at 02:00 UTC. Set the same `CRON_SECRET`; Vercel sends it to the secured job endpoint.
+
+Vercel Functions cannot act as a WebSocket server, so Socket.IO is deliberately not started by the serverless entry point. The production frontend automatically keeps realtime disabled unless `VITE_SOCKET_URL` points to a dedicated Socket.IO host; REST mutations and cache refetching remain fully functional. Uploads also need a persistent object-storage provider such as Cloudinary before using them in production because a serverless filesystem is not durable.
+
 The default local database is `kishan-bhaiya-demo`. In development, the server non-destructively inserts missing fictional demo records there; it never replaces an existing record. Set `AUTO_SEED_DEMO=false` to disable this behavior. If MongoDB is unavailable, the API starts with a clearly logged in-memory demo store when `ALLOW_MEMORY_FALLBACK=true`. All UI mutations still travel through Express, but that fallback resets when the server restarts. Production never enables either demo behavior.
 
 For pnpm, use `pnpm install` and `pnpm dev`. The dedicated demo database fills itself non-destructively on first development startup.

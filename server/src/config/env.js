@@ -12,5 +12,6 @@ export const env = {
   refreshSecret: process.env.JWT_REFRESH_SECRET || 'development-refresh-secret-change-me',
   accessTtl: process.env.ACCESS_TOKEN_TTL || '15m',
   refreshTtl: process.env.REFRESH_TOKEN_TTL || '7d',
-  geocodingBaseUrl: process.env.GEOCODING_BASE_URL || 'https://nominatim.openstreetmap.org'
+  geocodingBaseUrl: process.env.GEOCODING_BASE_URL || 'https://nominatim.openstreetmap.org',
+  cronSecret: process.env.CRON_SECRET || ''
 };

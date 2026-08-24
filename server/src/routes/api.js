@@ -12,6 +12,7 @@ import { reverseIndiaLocation } from "../services/geocoding.js";
 import { providers } from "../providers/index.js";
 import { asyncHandler, HttpError, ok } from "../utils/http.js";
 import { env } from "../config/env.js";
+import { refreshLotFreshness } from "../jobs/scheduler.js";
 import {
   allowRoles,
   requireAuth,
@@ -24,6 +25,15 @@ import { upload, verificationUpload } from "../middleware/upload.js";
 const router = Router();
 const emit = (req, event, payload) => req.app.get("io")?.emit(event, payload);
 const id = (prefix) => `${prefix}-${nanoid(8)}`;
+const refreshCookieOptions = {
+  httpOnly: true,
+  // The frontend and API use different Vercel domains in production, so the
+  // refresh cookie must be explicitly cross-site. Local development remains
+  // strict enough for http://localhost.
+  sameSite: env.nodeEnv === "production" ? "none" : "lax",
+  secure: env.nodeEnv === "production",
+  path: "/api/v1/auth",
+};
 const accountStatusOf = (user) => user?.accountStatus || (user?.verified ? "ACTIVE" : "PENDING_ADMIN_APPROVAL");
 const verificationStatusOf = (user) => user?.verificationStatus || (user?.verified ? "APPROVED" : "PENDING");
 const cleanUser = (user) => {
@@ -210,6 +220,16 @@ router.get(
   ),
 );
 router.get(
+  "/jobs/freshness",
+  asyncHandler(async (req, res) => {
+    const expected = env.cronSecret && `Bearer ${env.cronSecret}`;
+    if (!expected || req.headers.authorization !== expected)
+      throw new HttpError(401, "Invalid cron authorization");
+    await refreshLotFreshness();
+    ok(res, { status: "ok", job: "freshness", ranAt: new Date().toISOString() });
+  }),
+);
+router.get(
   "/locations/reverse",
   asyncHandler(async (req, res) => {
     const latitude = Number(req.query.latitude);
@@ -256,11 +276,8 @@ router.post(
       refreshTokenHash: await bcrypt.hash(refreshToken, 10),
     });
     res.cookie("kishan_bhaiya_refresh", refreshToken, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: env.nodeEnv === "production",
+      ...refreshCookieOptions,
       maxAge: 7 * 86400000,
-      path: "/api/v1/auth",
     });
     ok(res, { user: cleanUser(user), accessToken });
   }),
@@ -309,11 +326,8 @@ router.post(
       refreshTokenHash: await bcrypt.hash(refreshToken, 10),
     });
     res.cookie("kishan_bhaiya_refresh", refreshToken, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: env.nodeEnv === "production",
+      ...refreshCookieOptions,
       maxAge: 7 * 86400000,
-      path: "/api/v1/auth",
     });
     ok(res, { user: cleanUser(user), accessToken });
   }),
@@ -336,7 +350,7 @@ router.post(
 router.post(
   "/auth/logout",
   asyncHandler(async (req, res) => {
-    res.clearCookie("kishan_bhaiya_refresh", { path: "/api/v1/auth" });
+    res.clearCookie("kishan_bhaiya_refresh", refreshCookieOptions);
     ok(res, { message: "Signed out" });
   }),
 );
