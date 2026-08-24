@@ -2,4 +2,5 @@ packages:
   - client
   - server
 allowBuilds:
-  esbuild: set this to true or false
+  # Vite relies on esbuild's trusted platform-binary install script.
+  esbuild: true
