@@ -14,9 +14,21 @@ export const createApp = ({ initialize } = {}) => {
   const app = express();
   app.disable("x-powered-by");
   app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
+  const allowedOrigins = env.clientUrl.split(",").map((x) => x.trim());
   app.use(
     cors({
-      origin: env.clientUrl.split(",").map((x) => x.trim()),
+      origin: (origin, cb) => {
+        // Allow requests with no origin (mobile apps, curl, server-to-server)
+        if (!origin) return cb(null, true);
+        // Allow configured origins and Vercel preview deployments
+        if (
+          allowedOrigins.includes(origin) ||
+          origin.endsWith(".vercel.app")
+        ) {
+          return cb(null, origin);
+        }
+        cb(null, false);
+      },
       credentials: true,
     }),
   );
