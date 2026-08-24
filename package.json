@@ -1,0 +1,19 @@
+{
+  "name": "kishan-bhaiya",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Farm-to-market commerce and smart logistics platform",
+  "workspaces": ["client", "server"],
+  "scripts": {
+    "dev": "concurrently -n API,WEB -c yellow,green \"npm run dev --workspace server\" \"npm run dev --workspace client\"",
+    "build": "npm run build --workspace client",
+    "start": "npm run start --workspace server",
+    "seed": "npm run seed --workspace server",
+    "test": "npm run test --workspace server && npm run test --workspace client",
+    "lint": "npm run lint --workspace client && npm run lint --workspace server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "prettier": "^3.6.2"
+  }
+}

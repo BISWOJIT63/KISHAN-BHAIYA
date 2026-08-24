@@ -1,0 +1,11 @@
+services:
+  mongodb:
+    image: mongo:7
+    container_name: kishan-bhaiya-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - kishan_bhaiya_mongo:/data/db
+volumes:
+  kishan_bhaiya_mongo:

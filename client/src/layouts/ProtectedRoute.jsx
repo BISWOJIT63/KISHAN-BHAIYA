@@ -1,0 +1,3 @@
+import { Navigate,useLocation } from 'react-router-dom';
+import { useAppStore } from '../store/useAppStore.js';
+export default function ProtectedRoute({roles,allowGuest=false,children}){const user=useAppStore(s=>s.user),location=useLocation();if(!user&&!allowGuest)return <Navigate to="/login" state={{from:location.pathname}} replace/>;const accountStatus=user?.accountStatus||(user?.verified?'ACTIVE':'PENDING_ADMIN_APPROVAL');const restrictedAccountRoute=['/verification','/profile'].includes(location.pathname);if(user&&user.role!=='admin'&&accountStatus!=='ACTIVE'&&!restrictedAccountRoute)return <Navigate to="/verification" replace/>;if(user&&roles&&!roles.includes(user.role))return <Navigate to="/permission-denied" replace/>;return children;}
