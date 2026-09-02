@@ -22,12 +22,12 @@ export const initializeRuntime = () => {
         connection.connected &&
         env.nodeEnv !== "production" &&
         env.autoSeedDemo &&
-        /^kishan-bhaiya-demo(?:-|$)/i.test(mongoose.connection.name)
+        /^kisanexpress-demo(?:-|$)/i.test(mongoose.connection.name)
       ) {
         const seeded = await store.ensureDemoData();
         if (seeded.inserted) {
           console.log(
-            `[Kishan Bhaiya] Added ${seeded.inserted} missing records to the dedicated demo database.`,
+            `[KisanExpress] Added ${seeded.inserted} missing records to the dedicated demo database.`,
           );
         }
       }

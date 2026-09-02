@@ -15,6 +15,7 @@ import { api, apiError, getData } from "../api/client.js";
 import { useAppStore } from "../store/useAppStore.js";
 import { InlineLoader, PageHeader } from "../components/UI.jsx";
 import { money } from "../utils/format.js";
+import SmartImage from '../components/SmartImage.jsx';
 export default function CheckoutPage() {
   const { t } = useTranslation();
   const { cart, clearCart, user } = useAppStore(),
@@ -54,7 +55,9 @@ export default function CheckoutPage() {
       toast.success(t("checkout.confirmed"), {
         description: `${data._id} is being prepared.`,
       });
-      navigate(`/orders/${data._id}`);
+      // Straight to the feedback screen while the experience is fresh; it links
+      // on to the order, so nobody is stranded there.
+      navigate(`/feedback/${data._id}`);
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -156,7 +159,7 @@ export default function CheckoutPage() {
           <div className="mt-5 max-h-72 space-y-4 overflow-auto">
             {cart.map((i) => (
               <div key={i.productId} className="flex gap-3">
-                <img
+                <SmartImage
                   src={i.image}
                   alt=""
                   className="h-14 w-14 rounded-xl object-cover"

@@ -30,6 +30,8 @@ import {
 } from "../components/UI.jsx";
 import { useAppStore } from "../store/useAppStore.js";
 import { cx, money, number, shortDate } from "../utils/format.js";
+import SmartImage from '../components/SmartImage.jsx';
+import { ProductReviews } from './ReviewPages.jsx';
 
 const tabs = ["Overview", "Quality details", "Seller", "Reviews"];
 
@@ -117,7 +119,7 @@ export default function ProductDetailsPage() {
       <div className="grid gap-8 lg:grid-cols-[1.08fr_.92fr]">
         <div>
           <div className="card relative aspect-[5/4] overflow-hidden">
-            <img
+            <SmartImage
               src={product.image}
               alt={product.name}
               className="h-full w-full object-cover"
@@ -163,7 +165,7 @@ export default function ProductDetailsPage() {
                       : "border-transparent opacity-65 hover:opacity-100",
                   )}
                 >
-                  <img
+                  <SmartImage
                     src={image}
                     alt={`${product.name} view ${index + 1}`}
                     className="h-full w-full object-cover"
@@ -277,7 +279,8 @@ export default function ProductDetailsPage() {
 
           <article className="card mt-6 p-5">
             <div className="flex gap-4">
-              <img
+              <SmartImage
+                variant="avatar"
                 src={product.seller?.image}
                 alt={product.seller?.name}
                 className="h-14 w-14 rounded-2xl object-cover"
@@ -393,7 +396,8 @@ export default function ProductDetailsPage() {
             </div>
           ) : tab === "Seller" ? (
             <div className="flex max-w-3xl flex-col items-start gap-4 sm:flex-row sm:items-center">
-              <img
+              <SmartImage
+                variant="avatar"
                 src={product.seller?.image}
                 alt={product.seller?.name}
                 className="h-20 w-20 rounded-3xl object-cover"
@@ -411,6 +415,8 @@ export default function ProductDetailsPage() {
                 Seller profile <ArrowRight className="h-4 w-4" />
               </Link>
             </div>
+          ) : tab === "Reviews" ? (
+            <ProductReviews productId={product._id} />
           ) : (
             <div className="max-w-3xl">
               <h2 className="font-display text-xl font-bold">{tab}</h2>

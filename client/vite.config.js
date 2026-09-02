@@ -9,9 +9,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg'],
       manifest: {
-        name: 'Kishan Bhaiya',
+        name: 'KisanExpress',
         short_name: 'Kishan',
-        description: 'Kishan Bhaiya agriculture marketplace and smart logistics',
+        description: 'KisanExpress agriculture marketplace and smart logistics',
         theme_color: '#153d2e',
         background_color: '#f7f6ef',
         display: 'standalone',

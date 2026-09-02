@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { useAppStore } from "../store/useAppStore.js";
 import { cx, money, shortDate } from "../utils/format.js";
 import { canShop } from "../utils/navigation.js";
+import SmartImage from "./SmartImage.jsx";
 import { VerifiedBadge } from "./UI.jsx";
 
 export default function ProductCard({ product }) {
@@ -38,14 +39,10 @@ export default function ProductCard({ product }) {
     <article className="card card-hover group overflow-hidden">
       <div className="relative aspect-[4/3] overflow-hidden bg-forest-50">
         <Link to={`/product/${product._id}`}>
-          <img
+          <SmartImage
             src={product.image}
             alt={product.name}
-            loading="lazy"
             className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
-            onError={(event) => {
-              event.currentTarget.style.display = "none";
-            }}
           />
         </Link>
         {shoppingEnabled && <button

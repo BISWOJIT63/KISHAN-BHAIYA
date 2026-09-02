@@ -6,10 +6,31 @@ import { collectionMap, models } from "../models/index.js";
 
 const clone = (value) => structuredClone(value);
 
+/**
+ * Some seed collections (sellers, most notably) identify records with `id`
+ * rather than `_id`. MongoDB mode copies `id` into `_id` on upsert, so anything
+ * addressed by `_id` — every `get`/`update` call — silently missed the record in
+ * memory mode. Normalising up front keeps the two modes addressable the same way
+ * while leaving the original `id` in place for the code that matches on it.
+ */
+const withIds = (data) =>
+  Object.fromEntries(
+    Object.entries(data).map(([key, values]) => [
+      key,
+      Array.isArray(values)
+        ? values.map((value) =>
+            value && typeof value === "object" && !value._id && value.id
+              ? { ...value, _id: value.id }
+              : value,
+          )
+        : values,
+    ]),
+  );
+
 class DataStore {
   constructor() {
     this.mode = "memory";
-    this.data = buildSeedData();
+    this.data = withIds(buildSeedData());
   }
 
   async initialize(mode = "memory") {
@@ -55,6 +76,8 @@ class DataStore {
       "user-logistics",
       "user-admin",
       "user-driver",
+      "user-driver-bulk",
+      "user-driver-store",
       "user-fleet",
     ]);
     for (const user of data.users.filter((item) => managedDemoIds.has(item._id))) {
@@ -137,6 +160,14 @@ class DataStore {
       updatedAt: new Date().toISOString(),
     };
     return clone(this.data[key][index]);
+  }
+
+  async remove(key, id, session = null) {
+    if (this.mode === "mongodb")
+      return this.model(key).findByIdAndDelete(id, { session }).lean();
+    const index = (this.data[key] || []).findIndex((item) => item._id === id);
+    if (index < 0) return null;
+    return clone(this.data[key].splice(index, 1)[0]);
   }
 
   async insertMany(key, values) {

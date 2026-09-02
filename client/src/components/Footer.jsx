@@ -23,9 +23,6 @@ const roleLinks = {
   logistics_partner: [
     ["Fleet", [["Shipments", "/logistics"], ["Route planner", "/logistics/planner"]]],
   ],
-  driver: [
-    ["Driver", [["My trips", "/logistics"]]],
-  ],
   admin: [
     ["Administration", [["Admin operations", "/admin"], ["Verification queue", "/admin/verifications"]]],
   ],
@@ -50,12 +47,12 @@ export default function Footer() {
             <p className="mt-5 max-w-xs text-sm leading-6 text-forest-100/70">A trusted bridge between India’s producers and the people and businesses they feed.</p>
             <div className="mt-6 space-y-2 text-xs text-forest-100/60">
               <p className="flex items-center gap-2"><MapPin className="h-4 w-4" />India-wide location support</p>
-              <p className="flex items-center gap-2"><Mail className="h-4 w-4" />hello@kishanbhaiya.demo</p>
+              <p className="flex items-center gap-2"><Mail className="h-4 w-4" />hello@kisanexpress.demo</p>
               <p className="flex items-center gap-2"><Phone className="h-4 w-4" />Development demo support</p>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-8 md:grid-cols-3">
-            {[...groups, ["Kishan Bhaiya", publicLinks]].map(([group, links]) => (
+            {[...groups, ["KisanExpress", publicLinks]].map(([group, links]) => (
               <div key={group}>
                 <h3 className="text-sm font-bold">{group}</h3>
                 <ul className="mt-4 space-y-3">
@@ -66,7 +63,7 @@ export default function Footer() {
           </div>
         </div>
         <div className="mt-12 flex flex-col justify-between gap-4 border-t border-white/10 pt-6 text-xs text-forest-100/50 sm:flex-row sm:items-center">
-          <p>© 2026 Kishan Bhaiya. Development demonstration — all accounts and provider data are fictional.</p>
+          <p>© 2026 KisanExpress. Development demonstration — all accounts and provider data are fictional.</p>
           <div className="flex items-center gap-3"><a href="#" aria-label="Facebook"><Facebook className="h-4 w-4" /></a><a href="#" aria-label="Instagram"><Instagram className="h-4 w-4" /></a><a href="#" aria-label="LinkedIn"><Linkedin className="h-4 w-4" /></a></div>
         </div>
       </div>

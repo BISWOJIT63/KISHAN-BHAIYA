@@ -2,12 +2,12 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
-import { nanoid } from "nanoid";
 import { store } from "../services/dataStore.js";
 import { scoreCandidates, buildFulfillmentPlan } from "../services/matching.js";
-import { optimizeRoute } from "../services/routeOptimizer.js";
-import { buildShipmentDrafts } from "../services/fulfillmentPlanner.js";
-import { findLoadOpportunities, mergeAcceptedLoad, evaluateLoadOpportunity } from "../services/loadSharing.js";
+import {
+  fetchMandiBenchmarks,
+  priceRecommendation,
+} from "../services/priceIntelligence.js";
 import { reverseIndiaLocation } from "../services/geocoding.js";
 import { providers } from "../providers/index.js";
 import { asyncHandler, HttpError, ok } from "../utils/http.js";
@@ -20,11 +20,18 @@ import {
   signRefresh,
 } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
-import { upload, verificationUpload } from "../middleware/upload.js";
+import {
+  audioUpload,
+  upload,
+  verificationUpload,
+} from "../middleware/upload.js";
+import { registerUrbanStoreRoutes } from "./urbanStores.js";
+import { registerLogisticsRoutes } from "./logistics.js";
+import { registerBulkProcurementRoutes } from "./bulkProcurement.js";
+import { registerRecurringProcurementRoutes } from "./recurringProcurement.js";
 
 const router = Router();
 const emit = (req, event, payload) => req.app.get("io")?.emit(event, payload);
-const id = (prefix) => `${prefix}-${nanoid(8)}`;
 const refreshCookieOptions = {
   httpOnly: true,
   // The frontend and API use different Vercel domains in production, so the
@@ -34,8 +41,10 @@ const refreshCookieOptions = {
   secure: env.nodeEnv === "production",
   path: "/api/v1/auth",
 };
-const accountStatusOf = (user) => user?.accountStatus || (user?.verified ? "ACTIVE" : "PENDING_ADMIN_APPROVAL");
-const verificationStatusOf = (user) => user?.verificationStatus || (user?.verified ? "APPROVED" : "PENDING");
+const accountStatusOf = (user) =>
+  user?.accountStatus || (user?.verified ? "ACTIVE" : "PENDING_ADMIN_APPROVAL");
+const verificationStatusOf = (user) =>
+  user?.verificationStatus || (user?.verified ? "APPROVED" : "PENDING");
 const cleanUser = (user) => {
   const safe = { ...user };
   delete safe.passwordHash;
@@ -45,11 +54,81 @@ const cleanUser = (user) => {
   safe.verificationStatus = verificationStatusOf(user);
   return safe;
 };
-const cleanVerificationDocument = ({ secureFileKey: _secureFileKey, ...document }) => document;
-const sellerForUser = (sellers, userId) => sellers.find((seller) => seller.userId === userId) || null;
+const cleanVerificationDocument = ({
+  secureFileKey: _secureFileKey,
+  ...document
+}) => document;
+/** Origin this API is reachable at. Behind a proxy `trust proxy` makes req.protocol honest. */
+const publicOrigin = (req) =>
+  env.publicUrl || `${req.protocol}://${req.get("host")}`;
+/**
+ * Persists an uploaded image and returns an ABSOLUTE url. Absolute matters: the
+ * client is served from a different origin in production, so a root-relative
+ * `/uploads/x.png` would resolve against the frontend, which rewrites unknown
+ * paths to index.html — the browser then silently fails to decode HTML as an
+ * image, which is exactly how "the image is not set" presents.
+ */
+const saveUploadedImage = async (req) => {
+  const record = await store.create(
+    "uploadedFiles",
+    {
+      ownerId: req.user.sub,
+      mimeType: req.file.mimetype,
+      size: req.file.size,
+      originalName: String(req.file.originalname || "").slice(0, 120),
+      data: req.file.buffer.toString("base64"),
+    },
+    "file",
+  );
+  return {
+    fileId: record._id,
+    url: `${publicOrigin(req)}/api/v1/files/${record._id}`,
+  };
+};
+/**
+ * `products[].seller` is a snapshot denormalised at create time and nothing
+ * refreshes it, so a new avatar has to be pushed onto the seller's product cards
+ * too — otherwise the marketplace keeps showing the old or missing photo.
+ */
+const applySellerImage = async (userId, image) => {
+  const seller = (await store.list("sellers")).find(
+    (item) => item.userId === userId,
+  );
+  if (!seller) return;
+  await store.update("sellers", seller._id || seller.id, { image });
+  // Product.sellerId is populated from either key depending on how the seller
+  // record was created, so match on both rather than trusting one.
+  const keys = [seller._id, seller.id].filter(Boolean);
+  const products = (await store.list("products")).filter((product) =>
+    keys.includes(product.sellerId),
+  );
+  await Promise.all(
+    products.map((product) =>
+      store.update("products", product._id, {
+        seller: { ...(product.seller || {}), image },
+      }),
+    ),
+  );
+};
+const sellerForUser = (sellers, userId) =>
+  sellers.find((seller) => seller.userId === userId) || null;
+/**
+ * Inline SVG rather than a CDN photo: the previous default pointed at
+ * images.unsplash.com, so every listing without its own picture went blank on a
+ * firewalled venue network or offline demo. This one always renders.
+ */
+const fallbackProduceImage =
+  "data:image/svg+xml;utf8," +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 120 90">' +
+      '<rect width="120" height="90" fill="#eef4ec"/>' +
+      '<path d="M30 64c22-2 34-19 54-37 0 32-15 56-44 56-5 0-10-2-12-7 12-10 24-19 41-29-19 7-29 12-39 17z" fill="#a7d65b"/>' +
+      "</svg>",
+  );
 const shipmentBelongsToOrders = (shipment, orderIds) =>
-  (shipment.orderIds || (shipment.orderId ? [shipment.orderId] : []))
-    .some((orderId) => orderIds.has(orderId));
+  (shipment.orderIds || (shipment.orderId ? [shipment.orderId] : [])).some(
+    (orderId) => orderIds.has(orderId),
+  );
 const maskIdentifier = (value) => {
   const compact = String(value || "").replace(/\s+/g, "");
   return compact ? `•••• ${compact.slice(-4)}` : "";
@@ -73,58 +152,44 @@ const registerSchema = z.object({
   email: z.email(),
   phone: z.string().optional(),
   password: z.string().min(8),
-  role: z.enum(["consumer", "business_buyer", "farmer", "fpo_manager", "driver", "logistics_partner"]),
+  role: z.enum([
+    "consumer",
+    "business_buyer",
+    "farmer",
+    "fpo_manager",
+    "driver",
+    "logistics_partner",
+  ]),
   organization: z.string().trim().max(120).optional(),
   location: z.string().trim().max(80).optional(),
-  locationCoordinates: z.tuple([z.number().min(68).max(97.5), z.number().min(6).max(37.7)]).nullable().optional(),
+  locationCoordinates: z
+    .tuple([z.number().min(68).max(97.5), z.number().min(6).max(37.7)])
+    .nullable()
+    .optional(),
   locationSource: z.enum(["MANUAL", "GPS", "REVERSE_GEOCODED"]).optional(),
   preferredLanguage: z.enum(["en", "hi", "or"]).default("en"),
 });
-const profileSchema = z.object({
-  name: z.string().trim().min(2).max(80),
-  email: z.email().transform((value) => value.toLowerCase()),
-  phone: z.string().trim().regex(/^[0-9+ ()-]{10,16}$/, "Enter a valid phone number"),
-  organization: z.string().trim().max(120).optional().default(""),
-  location: z.string().trim().min(2).max(80),
-  locationCoordinates: z.tuple([z.number().min(68).max(97.5), z.number().min(6).max(37.7)]).nullable().optional(),
-  locationSource: z.enum(["MANUAL", "GPS", "REVERSE_GEOCODED"]).optional(),
-}).strict();
-const requirementSchema = z.object({
-  product: z.string().min(2),
-  productId: z.string().optional(),
-  category: z.string().min(2),
-  quantity: z.coerce.number().positive(),
-  unit: z.string().default("kg"),
-  quality: z.string().min(1),
-  targetPrice: z.coerce.number().positive().optional(),
-  requiredDate: z.string(),
-  location: z.string().min(2),
-  allowPartial: z.boolean().default(true),
-  minFillPercent: z.coerce.number().min(1).max(100).default(80),
-  packaging: z.string().optional(),
-  transport: z.string().optional(),
-  recurring: z.boolean().default(false),
-  notes: z.string().max(1000).optional(),
-});
-const quotationSchema = z.object({
-  quantity: z.coerce.number().positive(),
-  pricePerUnit: z.coerce.number().positive(),
-  deliveryDate: z.string(),
-  transportCost: z.coerce.number().min(0).default(0),
-  transportIncluded: z.boolean().default(false),
-  paymentTerms: z.string().min(2),
-  packaging: z.string().optional(),
-  validUntil: z.string(),
-  note: z.string().max(1000).optional(),
-});
-const counterSchema = z.object({
-  pricePerUnit: z.coerce.number().positive(),
-  quantity: z.coerce.number().positive(),
-  deliveryDate: z.string(),
-  transportCost: z.coerce.number().min(0),
-  paymentTerms: z.string().min(2),
-  message: z.string().max(1000).optional(),
-});
+const profileSchema = z
+  .object({
+    name: z.string().trim().min(2).max(80).optional(),
+    email: z
+      .email()
+      .transform((value) => value.toLowerCase())
+      .optional(),
+    phone: z
+      .string()
+      .trim()
+      .regex(/^[0-9+ ()-]{10,16}$/, "Enter a valid phone number")
+      .optional(),
+    organization: z.string().trim().max(120).optional().default(""),
+    location: z.string().trim().min(2).max(80).optional(),
+    locationCoordinates: z
+      .tuple([z.number().min(68).max(97.5), z.number().min(6).max(37.7)])
+      .nullable()
+      .optional(),
+    locationSource: z.enum(["MANUAL", "GPS", "REVERSE_GEOCODED"]).optional(),
+  })
+  .strict();
 const harvestSchema = z.object({
   product: z.string().min(2),
   productId: z.string().optional(),
@@ -152,16 +217,43 @@ const productSchema = z.object({
   locationName: z.string().min(2),
   packaging: z.string().min(2),
 });
-const verificationReviewSchema = z.object({
-  action: z.enum(["APPROVE", "REQUEST_CHANGES", "REJECT", "SUSPEND", "REACTIVATE"]),
-  reasonCode: z.string().trim().max(80).optional(),
-  note: z.string().trim().max(1000).optional(),
-}).superRefine((value, context) => {
-  if (["REQUEST_CHANGES", "REJECT", "SUSPEND"].includes(value.action) && !value.note)
-    context.addIssue({ code: "custom", path: ["note"], message: "Add a review note for this action" });
-  if (value.action === "REJECT" && !value.reasonCode)
-    context.addIssue({ code: "custom", path: ["reasonCode"], message: "Choose a rejection reason" });
+/**
+ * Editing a listing was impossible before — there was no update route at all, so
+ * a product saved with a broken or empty image could never be corrected without
+ * recreating it. Every field is optional so the client can PATCH just the image.
+ */
+const productUpdateSchema = productSchema.partial().extend({
+  status: z.enum(["active", "paused"]).optional(),
 });
+const verificationReviewSchema = z
+  .object({
+    action: z.enum([
+      "APPROVE",
+      "REQUEST_CHANGES",
+      "REJECT",
+      "SUSPEND",
+      "REACTIVATE",
+    ]),
+    reasonCode: z.string().trim().max(80).optional(),
+    note: z.string().trim().max(1000).optional(),
+  })
+  .superRefine((value, context) => {
+    if (
+      ["REQUEST_CHANGES", "REJECT", "SUSPEND"].includes(value.action) &&
+      !value.note
+    )
+      context.addIssue({
+        code: "custom",
+        path: ["note"],
+        message: "Add a review note for this action",
+      });
+    if (value.action === "REJECT" && !value.reasonCode)
+      context.addIssue({
+        code: "custom",
+        path: ["reasonCode"],
+        message: "Choose a rejection reason",
+      });
+  });
 const membershipRequestSchema = z.object({
   fpoId: z.string().min(2),
   message: z.string().trim().max(500).optional().default(""),
@@ -170,44 +262,182 @@ const membershipReviewSchema = z.object({
   action: z.enum(["APPROVE", "REJECT"]),
   note: z.string().trim().max(500).optional().default(""),
 });
-const shipmentDispatchSchema = z.object({
-  vehicleId: z.string().min(2),
+/**
+ * Reviews are deliberately forgiving: a star rating alone is a valid review.
+ * Requiring written text would exclude the low-literacy farmers and buyers this
+ * marketplace is built for, so `comment` is always optional and tags carry the
+ * structured signal instead.
+ */
+const orderReviewSchema = z.object({
+  rating: z.coerce.number().int().min(1).max(5),
+  comment: z.string().trim().max(1000).optional().default(""),
+  tags: z.array(z.string().trim().max(40)).max(8).optional().default([]),
+  productRatings: z
+    .array(
+      z.object({
+        productId: z.string().min(1),
+        rating: z.coerce.number().int().min(1).max(5),
+        comment: z.string().trim().max(500).optional().default(""),
+      }),
+    )
+    .max(30)
+    .optional()
+    .default([]),
 });
-const shipmentStopSchema = z.object({
-  notes: z.string().trim().max(500).optional().default(""),
-  quantity: z.coerce.number().min(0).optional(),
+const platformFeedbackSchema = z.object({
+  rating: z.coerce.number().int().min(1).max(5),
+  comment: z.string().trim().max(1000).optional().default(""),
+  tags: z.array(z.string().trim().max(40)).max(8).optional().default([]),
+  orderId: z.string().trim().max(60).optional().default(""),
 });
-const shipmentIssueSchema = z.object({
-  type: z.enum(["BREAKDOWN", "TRAFFIC", "WEATHER", "QUALITY", "QUANTITY", "OTHER"]),
-  severity: z.enum(["LOW", "MEDIUM", "HIGH"]).default("MEDIUM"),
-  message: z.string().trim().min(3).max(500),
+/**
+ * A producer accepting or rejecting the lines of a retail order that belong to
+ * them. The reason is optional on accept and surfaced to the buyer on reject.
+ */
+const sellerResponseSchema = z.object({
+  action: z.enum(["ACCEPT", "REJECT"]),
+  reason: z.string().trim().max(300).optional().default(""),
 });
-const loadOfferSchema = z.object({
-  candidateShipmentId: z.string().min(2),
-});
-const loadOfferResponseSchema = z.object({
-  action: z.enum(["ACCEPT", "DECLINE"]),
-  note: z.string().trim().max(500).optional().default(""),
-});
-
-const assertShipmentAccess = (req, shipment, message = "Drivers can access only their assigned shipments") => {
-  if (req.user.role === "driver" && shipment.driverUserId !== req.user.sub)
-    throw new HttpError(403, message);
-};
-
-const optimizeStoredShipment = async (shipment, trigger, session = null) => {
-  const route = optimizeRoute(
-    shipment.stops,
-    { capacity: shipment.capacity, load: shipment.load, coldChain: shipment.coldChain },
-    { trigger, coldChainRequired: shipment.coldChainRequired },
+/** Sellers are referenced by `id` in some records and `_id` in others. */
+const sellerKeys = (seller) => [seller?._id, seller?.id].filter(Boolean);
+const averageRating = (rows) =>
+  rows.length
+    ? Number(
+        (
+          rows.reduce((sum, row) => sum + Number(row.rating || 0), 0) /
+          rows.length
+        ).toFixed(2),
+      )
+    : 0;
+/**
+ * Seeded products and sellers ship with a plausible rating and review count for
+ * the demo. Recomputing purely from the Review collection would make the first
+ * real review crash a 4.8/243 seller down to a single number, so the seeded
+ * figures are frozen once as a baseline and real reviews are blended in from
+ * there. Capturing the baseline is idempotent — it only ever happens once.
+ */
+const blendRating = (record, reviews) => {
+  const baseline = record.ratingBaseline || {
+    rating: Number(record.rating) || 0,
+    reviews: Number(record.reviews) || 0,
+  };
+  const liveTotal = reviews.reduce(
+    (sum, row) => sum + Number(row.rating || 0),
+    0,
   );
-  return store.update("shipments", shipment._id, {
-    ...route,
-    autoOptimized: true,
-    lastOptimizedAt: route.routeOptimization.optimizedAt,
-  }, session);
+  const weight = baseline.reviews + reviews.length;
+  return {
+    ratingBaseline: baseline,
+    reviews: weight,
+    rating: weight
+      ? Number(
+          ((baseline.rating * baseline.reviews + liveTotal) / weight).toFixed(
+            1,
+          ),
+        )
+      : 0,
+    liveReviews: reviews.length,
+    liveRating: averageRating(reviews),
+  };
+};
+const recomputeProductRating = async (productId) => {
+  const product = await store.get("products", productId);
+  if (!product) return null;
+  const reviews = await store.list("reviews", { productId });
+  const blended = blendRating(product, reviews);
+  return store.update("products", product._id, blended);
+};
+const recomputeSellerRating = async (sellerId) => {
+  const sellers = await store.list("sellers");
+  const seller = sellers.find((candidate) =>
+    sellerKeys(candidate).includes(sellerId),
+  );
+  if (!seller) return null;
+  const keys = sellerKeys(seller);
+  // Only seller-level reviews count toward the seller score; per-product reviews
+  // roll up into the product rating instead so a multi-item order cannot let one
+  // buyer move the seller average several times.
+  const reviews = (await store.list("reviews", {})).filter(
+    (review) => keys.includes(review.sellerId) && !review.productId,
+  );
+  const blended = blendRating(seller, reviews);
+  const updated = await store.update(
+    "sellers",
+    seller._id || seller.id,
+    blended,
+  );
+  // `products[].seller` is a denormalised snapshot rendered on every card.
+  const products = (await store.list("products")).filter((product) =>
+    keys.includes(product.sellerId),
+  );
+  await Promise.all(
+    products.map((product) =>
+      store.update("products", product._id, {
+        seller: {
+          ...(product.seller || {}),
+          rating: blended.rating,
+          reviews: blended.reviews,
+        },
+      }),
+    ),
+  );
+  return updated;
+};
+/**
+ * Which sellers can be reviewed for an order. Bulk orders carry `sellerId`
+ * directly; retail orders have to be resolved through their line items.
+ */
+const sellersForOrder = async (order) => {
+  const sellers = await store.list("sellers");
+  const products = await store.list("products");
+  const ids = new Set();
+  if (order.sellerId) ids.add(order.sellerId);
+  for (const item of order.items || []) {
+    const product = products.find(
+      (candidate) => candidate._id === item.productId,
+    );
+    if (product?.sellerId) ids.add(product.sellerId);
+  }
+  return [...ids]
+    .map((sellerId) =>
+      sellers.find((candidate) => sellerKeys(candidate).includes(sellerId)),
+    )
+    .filter(Boolean);
 };
 
+/** Items on an order that belong to one seller, by any of that seller's ids. */
+const itemsForSeller = (order, seller) => {
+  const keys = sellerKeys(seller);
+  return (order.items || []).filter((item) => keys.includes(item.sellerId));
+};
+const sum = (rows, pick) =>
+  rows.reduce((total, row) => total + Number(pick(row) || 0), 0);
+/**
+ * Derives the order's own state from its per-seller line decisions. A retail
+ * order waits at PENDING_SELLER until every seller has answered; it then
+ * confirms on the lines that were accepted, or cancels outright if every seller
+ * said no. Rejected lines stay on the order (flagged) rather than being deleted
+ * so the buyer can see what happened and why.
+ */
+const settleOrderApproval = (order) => {
+  const items = order.items || [];
+  const pending = items.filter(
+    (item) => (item.approvalStatus || "PENDING") === "PENDING",
+  );
+  const accepted = items.filter((item) => item.approvalStatus === "ACCEPTED");
+  if (pending.length) return { status: "PENDING_SELLER", settled: false };
+  const subtotal = sum(accepted, (item) => item.price * item.quantity);
+  // Free-delivery threshold is re-applied to the surviving lines, so a buyer is
+  // never charged a fee that the original basket size had waived.
+  const deliveryFee = accepted.length ? (subtotal >= 799 ? 0 : 49) : 0;
+  return {
+    settled: true,
+    status: accepted.length ? "CONFIRMED" : "CANCELLED",
+    subtotal,
+    deliveryFee,
+    total: subtotal + deliveryFee,
+  };
+};
 router.get(
   "/health",
   asyncHandler(async (_req, res) =>
@@ -219,6 +449,51 @@ router.get(
     }),
   ),
 );
+router.post(
+  "/voice/transcribe",
+  requireAuth,
+  allowRoles("farmer", "fpo_manager"),
+  audioUpload.single("audio"),
+  asyncHandler(async (req, res) => {
+    if (!req.file) throw new HttpError(400, "Attach an audio recording");
+    if (!env.openAiApiKey)
+      throw new HttpError(
+        503,
+        "Voice transcription provider is not configured",
+      );
+    const form = new FormData();
+    form.append(
+      "file",
+      new Blob([req.file.buffer], { type: req.file.mimetype }),
+      req.file.originalname || "crop-listing.webm",
+    );
+    form.append("model", "gpt-4o-mini-transcribe");
+    if (req.body.language) form.append("language", String(req.body.language));
+    form.append(
+      "prompt",
+      "Indian crop listing. Preserve crop names, quantities in kg, prices in rupees, grade, and location.",
+    );
+    const response = await fetch(
+      "https://api.openai.com/v1/audio/transcriptions",
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${env.openAiApiKey}` },
+        body: form,
+      },
+    );
+    if (!response.ok)
+      throw new HttpError(
+        502,
+        "Voice transcription provider could not process this recording",
+      );
+    const transcription = await response.json();
+    ok(res, {
+      text: transcription.text || "",
+      provider: "OpenAI transcription",
+      language: req.body.language || "auto",
+    });
+  }),
+);
 router.get(
   "/jobs/freshness",
   asyncHandler(async (req, res) => {
@@ -226,7 +501,11 @@ router.get(
     if (!expected || req.headers.authorization !== expected)
       throw new HttpError(401, "Invalid cron authorization");
     await refreshLotFreshness();
-    ok(res, { status: "ok", job: "freshness", ranAt: new Date().toISOString() });
+    ok(res, {
+      status: "ok",
+      job: "freshness",
+      ranAt: new Date().toISOString(),
+    });
   }),
 );
 router.get(
@@ -237,7 +516,8 @@ router.get(
     try {
       const location = await reverseIndiaLocation(latitude, longitude);
       ok(res, location, {
-        privacy: "Coordinates are used only to resolve the selected location and are not exposed publicly.",
+        privacy:
+          "Coordinates are used only to resolve the selected location and are not exposed publicly.",
       });
     } catch (error) {
       throw new HttpError(400, error.message);
@@ -251,12 +531,33 @@ router.post(
   upload.single("image"),
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, "Choose an image to upload");
+    const stored = await saveUploadedImage(req);
     ok(res, {
-      url: `/uploads/${req.file.filename}`,
+      url: stored.url,
+      fileId: stored.fileId,
       provider: providers.uploads.name,
       mimeType: req.file.mimetype,
       size: req.file.size,
     });
+  }),
+);
+/**
+ * Public on purpose: these bytes are product photos and profile pictures that are
+ * already rendered on unauthenticated marketplace pages, and an `<img>` tag
+ * cannot send an Authorization header. Verification documents are deliberately
+ * NOT served here.
+ */
+router.get(
+  "/files/:id",
+  asyncHandler(async (req, res) => {
+    const file = await store.get("uploadedFiles", req.params.id);
+    if (!file) throw new HttpError(404, "Image not found");
+    const body = Buffer.from(file.data, "base64");
+    res.setHeader("Content-Type", file.mimeType || "application/octet-stream");
+    res.setHeader("Content-Length", String(body.length));
+    // Content is immutable — the id changes whenever the image does.
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    res.end(body);
   }),
 );
 
@@ -298,28 +599,40 @@ router.post(
         passwordHash: await bcrypt.hash(password, 12),
         contactVerified: true,
         verified: automaticallyActive,
-        accountStatus: automaticallyActive ? "ACTIVE" : "PENDING_ADMIN_APPROVAL",
+        accountStatus: automaticallyActive
+          ? "ACTIVE"
+          : "PENDING_ADMIN_APPROVAL",
         verificationStatus: automaticallyActive ? "APPROVED" : "PENDING",
       },
       "user",
     );
-    await store.create("verificationProfiles", {
-      userId: user._id,
-      role: user.role,
-      overallStatus: automaticallyActive ? "APPROVED" : "PENDING_ADMIN_APPROVAL",
-      submittedAt: new Date().toISOString(),
-      approvedAt: automaticallyActive ? new Date().toISOString() : undefined,
-      riskFlags: [],
-      missingRequirements: verificationRequirements[user.role] || [],
-      resubmissionCount: 0,
-    }, "verification");
-    await store.create("auditLogs", {
-      actorId: user._id,
-      action: "VERIFICATION_SUBMITTED",
-      entityType: "VerificationProfile",
-      entityId: user._id,
-      metadata: { role: user.role, automaticallyActive },
-    }, "audit");
+    await store.create(
+      "verificationProfiles",
+      {
+        userId: user._id,
+        role: user.role,
+        overallStatus: automaticallyActive
+          ? "APPROVED"
+          : "PENDING_ADMIN_APPROVAL",
+        submittedAt: new Date().toISOString(),
+        approvedAt: automaticallyActive ? new Date().toISOString() : undefined,
+        riskFlags: [],
+        missingRequirements: verificationRequirements[user.role] || [],
+        resubmissionCount: 0,
+      },
+      "verification",
+    );
+    await store.create(
+      "auditLogs",
+      {
+        actorId: user._id,
+        action: "VERIFICATION_SUBMITTED",
+        entityType: "VerificationProfile",
+        entityId: user._id,
+        metadata: { role: user.role, automaticallyActive },
+      },
+      "audit",
+    );
     const accessToken = signAccess(user);
     const refreshToken = signRefresh(user);
     await store.update("users", user._id, {
@@ -367,22 +680,63 @@ router.patch(
   requireAuth,
   validate(profileSchema),
   asyncHandler(async (req, res) => {
-    const emailOwner = await store.find("users", { email: req.body.email });
+    const emailOwner = req.body.email
+      ? await store.find("users", { email: req.body.email })
+      : null;
     if (emailOwner && emailOwner._id !== req.user.sub)
       throw new HttpError(409, "An account with this email already exists");
     const updated = await store.update("users", req.user.sub, req.body);
-    const seller = (await store.list("sellers")).find((item) => item.userId === req.user.sub);
+    const seller = (await store.list("sellers")).find(
+      (item) => item.userId === req.user.sub,
+    );
     if (seller && req.body.location)
-      await store.update("sellers", seller._id || seller.id, { location: req.body.location });
-    await store.create("auditLogs", {
-      actorId: req.user.sub,
-      action: "PROFILE_UPDATED",
-      entityType: "User",
-      entityId: req.user.sub,
-      metadata: { fields: Object.keys(req.body) },
-    }, "audit");
+      await store.update("sellers", seller._id || seller.id, {
+        location: req.body.location,
+      });
+    await store.create(
+      "auditLogs",
+      {
+        actorId: req.user.sub,
+        action: "PROFILE_UPDATED",
+        entityType: "User",
+        entityId: req.user.sub,
+        metadata: { fields: Object.keys(req.body) },
+      },
+      "audit",
+    );
     emit(req, "profile:updated", { userId: req.user.sub });
     ok(res, { user: cleanUser(updated), accessToken: signAccess(updated) });
+  }),
+);
+router.delete(
+  "/products/:id",
+  requireAuth,
+  allowRoles("farmer", "fpo_manager", "admin"),
+  asyncHandler(async (req, res) => {
+    const product = await store.get("products", req.params.id);
+    if (!product) throw new HttpError(404, "Product not found");
+    if (req.user.role !== "admin") {
+      const seller = (await store.list("sellers")).find(
+        (item) => item.userId === req.user.sub,
+      );
+      if (
+        ![seller?._id, seller?.id, req.user.sub]
+          .filter(Boolean)
+          .includes(product.sellerId)
+      )
+        throw new HttpError(403, "You can only delete your own listings");
+    }
+    const hasOrder = (await store.list("orders")).some((order) =>
+      (order.items || []).some((item) => item.productId === product._id),
+    );
+    if (hasOrder)
+      throw new HttpError(
+        409,
+        "This listing has order history. Pause it instead of deleting it.",
+      );
+    await store.remove("products", product._id);
+    emit(req, "product:deleted", { productId: product._id });
+    ok(res, { deleted: true, productId: product._id });
   }),
 );
 router.post(
@@ -391,18 +745,20 @@ router.post(
   upload.single("image"),
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, "Choose a profile image to upload");
-    const profileImage = `/uploads/${req.file.filename}`;
+    const { url: profileImage } = await saveUploadedImage(req);
     const updated = await store.update("users", req.user.sub, { profileImage });
-    const seller = (await store.list("sellers")).find((item) => item.userId === req.user.sub);
-    if (seller)
-      await store.update("sellers", seller._id || seller.id, { image: profileImage });
-    await store.create("auditLogs", {
-      actorId: req.user.sub,
-      action: "PROFILE_IMAGE_UPDATED",
-      entityType: "User",
-      entityId: req.user.sub,
-      metadata: { provider: providers.uploads.name },
-    }, "audit");
+    await applySellerImage(req.user.sub, profileImage);
+    await store.create(
+      "auditLogs",
+      {
+        actorId: req.user.sub,
+        action: "PROFILE_IMAGE_UPDATED",
+        entityType: "User",
+        entityId: req.user.sub,
+        metadata: { provider: providers.uploads.name },
+      },
+      "audit",
+    );
     emit(req, "profile:updated", { userId: req.user.sub });
     ok(res, { user: cleanUser(updated), accessToken: signAccess(updated) });
   }),
@@ -411,16 +767,20 @@ router.delete(
   "/auth/me/avatar",
   requireAuth,
   asyncHandler(async (req, res) => {
-    const updated = await store.update("users", req.user.sub, { profileImage: "" });
-    const seller = (await store.list("sellers")).find((item) => item.userId === req.user.sub);
-    if (seller)
-      await store.update("sellers", seller._id || seller.id, { image: "" });
-    await store.create("auditLogs", {
-      actorId: req.user.sub,
-      action: "PROFILE_IMAGE_REMOVED",
-      entityType: "User",
-      entityId: req.user.sub,
-    }, "audit");
+    const updated = await store.update("users", req.user.sub, {
+      profileImage: "",
+    });
+    await applySellerImage(req.user.sub, "");
+    await store.create(
+      "auditLogs",
+      {
+        actorId: req.user.sub,
+        action: "PROFILE_IMAGE_REMOVED",
+        entityType: "User",
+        entityId: req.user.sub,
+      },
+      "audit",
+    );
     emit(req, "profile:updated", { userId: req.user.sub });
     ok(res, { user: cleanUser(updated), accessToken: signAccess(updated) });
   }),
@@ -432,21 +792,35 @@ router.get(
   asyncHandler(async (req, res) => {
     const user = await store.get("users", req.user.sub);
     if (!user) throw new HttpError(404, "Account not found");
-    let profile = await store.find("verificationProfiles", { userId: user._id });
+    let profile = await store.find("verificationProfiles", {
+      userId: user._id,
+    });
     if (!profile) {
-      profile = await store.create("verificationProfiles", {
-        userId: user._id,
-        role: user.role,
-        overallStatus: accountStatusOf(user) === "ACTIVE" ? "APPROVED" : accountStatusOf(user),
-        submittedAt: user.createdAt,
-        approvedAt: accountStatusOf(user) === "ACTIVE" ? user.updatedAt : undefined,
-        riskFlags: [],
-        missingRequirements: verificationRequirements[user.role] || [],
-        resubmissionCount: 0,
-      }, "verification");
+      profile = await store.create(
+        "verificationProfiles",
+        {
+          userId: user._id,
+          role: user.role,
+          overallStatus:
+            accountStatusOf(user) === "ACTIVE"
+              ? "APPROVED"
+              : accountStatusOf(user),
+          submittedAt: user.createdAt,
+          approvedAt:
+            accountStatusOf(user) === "ACTIVE" ? user.updatedAt : undefined,
+          riskFlags: [],
+          missingRequirements: verificationRequirements[user.role] || [],
+          resubmissionCount: 0,
+        },
+        "verification",
+      );
     }
-    const documents = await store.list("verificationDocuments", { ownerId: user._id });
-    const reviews = await store.list("verificationReviews", { applicantId: user._id });
+    const documents = await store.list("verificationDocuments", {
+      ownerId: user._id,
+    });
+    const reviews = await store.list("verificationReviews", {
+      applicantId: user._id,
+    });
     ok(res, {
       user: cleanUser(user),
       profile,
@@ -461,32 +835,50 @@ router.post(
   verificationUpload.single("document"),
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, "Choose a verification document");
-    const documentType = String(req.body.documentType || "").trim().toUpperCase();
+    const documentType = String(req.body.documentType || "")
+      .trim()
+      .toUpperCase();
     if (!/^[A-Z0-9_]{3,60}$/.test(documentType))
       throw new HttpError(400, "Choose a valid document type");
-    const document = await store.create("verificationDocuments", {
-      ownerId: req.user.sub,
-      documentType,
-      documentNumberMasked: maskIdentifier(req.body.documentNumberMasked),
-      secureFileKey: req.file.filename,
-      mimeType: req.file.mimetype,
-      size: req.file.size,
-      status: "PENDING",
-      expiryDate: req.body.expiryDate || undefined,
-    }, "document");
-    const profile = await store.find("verificationProfiles", { userId: req.user.sub });
+    const document = await store.create(
+      "verificationDocuments",
+      {
+        ownerId: req.user.sub,
+        documentType,
+        documentNumberMasked: maskIdentifier(req.body.documentNumberMasked),
+        secureFileKey: req.file.filename,
+        mimeType: req.file.mimetype,
+        size: req.file.size,
+        status: "PENDING",
+        expiryDate: req.body.expiryDate || undefined,
+      },
+      "document",
+    );
+    const profile = await store.find("verificationProfiles", {
+      userId: req.user.sub,
+    });
     if (profile) {
       await store.update("verificationProfiles", profile._id, {
-        missingRequirements: (profile.missingRequirements || []).filter((requirement) => requirement !== documentType),
+        missingRequirements: (profile.missingRequirements || []).filter(
+          (requirement) => requirement !== documentType,
+        ),
       });
     }
-    await store.create("auditLogs", {
-      actorId: req.user.sub,
-      action: "VERIFICATION_DOCUMENT_UPLOADED",
-      entityType: "VerificationDocument",
-      entityId: document._id,
-      metadata: { documentType, mimeType: req.file.mimetype, size: req.file.size },
-    }, "audit");
+    await store.create(
+      "auditLogs",
+      {
+        actorId: req.user.sub,
+        action: "VERIFICATION_DOCUMENT_UPLOADED",
+        entityType: "VerificationDocument",
+        entityId: document._id,
+        metadata: {
+          documentType,
+          mimeType: req.file.mimetype,
+          size: req.file.size,
+        },
+      },
+      "audit",
+    );
     ok(res, cleanVerificationDocument(document));
   }),
 );
@@ -497,51 +889,85 @@ router.post(
     const user = await store.get("users", req.user.sub);
     const currentStatus = accountStatusOf(user);
     if (currentStatus === "SUSPENDED")
-      throw new HttpError(403, "A suspended account must be reviewed by an administrator");
+      throw new HttpError(
+        403,
+        "A suspended account must be reviewed by an administrator",
+      );
     if (currentStatus === "REJECTED")
-      throw new HttpError(403, "This application was rejected and cannot be resubmitted without administrator review");
-    const profile = await store.find("verificationProfiles", { userId: req.user.sub });
+      throw new HttpError(
+        403,
+        "This application was rejected and cannot be resubmitted without administrator review",
+      );
+    const profile = await store.find("verificationProfiles", {
+      userId: req.user.sub,
+    });
     if (!profile) throw new HttpError(404, "Verification profile not found");
     const resubmission = currentStatus === "CHANGES_REQUESTED";
-    const updatedProfile = await store.update("verificationProfiles", profile._id, {
-      overallStatus: "PENDING_ADMIN_APPROVAL",
-      submittedAt: new Date().toISOString(),
-      adminNote: "",
-      rejectionReasonCode: "",
-      resubmissionCount: (profile.resubmissionCount || 0) + (resubmission ? 1 : 0),
-    });
+    const updatedProfile = await store.update(
+      "verificationProfiles",
+      profile._id,
+      {
+        overallStatus: "PENDING_ADMIN_APPROVAL",
+        submittedAt: new Date().toISOString(),
+        adminNote: "",
+        rejectionReasonCode: "",
+        resubmissionCount:
+          (profile.resubmissionCount || 0) + (resubmission ? 1 : 0),
+      },
+    );
     const updatedUser = await store.update("users", req.user.sub, {
       accountStatus: "PENDING_ADMIN_APPROVAL",
       verificationStatus: "PENDING",
       verified: false,
     });
-    await store.create("auditLogs", {
-      actorId: req.user.sub,
-      action: resubmission ? "VERIFICATION_RESUBMITTED" : "VERIFICATION_SUBMITTED",
-      entityType: "VerificationProfile",
-      entityId: profile._id,
-    }, "audit");
-    emit(req, "verification:updated", { userId: req.user.sub, status: "PENDING_ADMIN_APPROVAL" });
-    ok(res, { user: cleanUser(updatedUser), profile: updatedProfile, accessToken: signAccess(updatedUser) });
+    await store.create(
+      "auditLogs",
+      {
+        actorId: req.user.sub,
+        action: resubmission
+          ? "VERIFICATION_RESUBMITTED"
+          : "VERIFICATION_SUBMITTED",
+        entityType: "VerificationProfile",
+        entityId: profile._id,
+      },
+      "audit",
+    );
+    emit(req, "verification:updated", {
+      userId: req.user.sub,
+      status: "PENDING_ADMIN_APPROVAL",
+    });
+    ok(res, {
+      user: cleanUser(updatedUser),
+      profile: updatedProfile,
+      accessToken: signAccess(updatedUser),
+    });
   }),
 );
 
-router.use(asyncHandler(async (req, _res, next) => {
-  if (!req.user || req.user.role === "admin") return next();
-  const publicBrowse = req.method === "GET" && [
-    /^\/products(?:\/|$)/,
-    /^\/sellers(?:\/|$)/,
-    /^\/quality-passports(?:\/|$)/,
-    /^\/price-intelligence(?:\/|$)/,
-  ].some((pattern) => pattern.test(req.path));
-  if (publicBrowse) return next();
-  const user = await store.get("users", req.user.sub);
-  const accountStatus = accountStatusOf(user);
-  if (accountStatus === "ACTIVE") return next();
-  const error = new HttpError(403, "Complete account verification before using this feature", { accountStatus });
-  error.code = "ACCOUNT_NOT_ACTIVE";
-  next(error);
-}));
+router.use(
+  asyncHandler(async (req, _res, next) => {
+    if (!req.user || req.user.role === "admin") return next();
+    const publicBrowse =
+      req.method === "GET" &&
+      [
+        /^\/products(?:\/|$)/,
+        /^\/sellers(?:\/|$)/,
+        /^\/quality-passports(?:\/|$)/,
+        /^\/price-intelligence(?:\/|$)/,
+      ].some((pattern) => pattern.test(req.path));
+    if (publicBrowse) return next();
+    const user = await store.get("users", req.user.sub);
+    const accountStatus = accountStatusOf(user);
+    if (accountStatus === "ACTIVE") return next();
+    const error = new HttpError(
+      403,
+      "Complete account verification before using this feature",
+      { accountStatus },
+    );
+    error.code = "ACCOUNT_NOT_ACTIVE";
+    next(error);
+  }),
+);
 
 router.get(
   "/bootstrap",
@@ -564,8 +990,12 @@ router.get(
       const canProcure = req.user.role === "business_buyer";
       data.workspace = { seller: seller || null };
       if (isProducer) {
-        data.products = seller ? data.products.filter((product) => product.sellerId === seller.id) : [];
-        data.lots = seller ? data.lots.filter((lot) => lot.sellerId === seller.id) : [];
+        data.products = seller
+          ? data.products.filter((product) => product.sellerId === seller.id)
+          : [];
+        data.lots = seller
+          ? data.lots.filter((lot) => lot.sellerId === seller.id)
+          : [];
       }
       if (req.user.role === "admin" || isProducer || canProcure) {
         const requirements = await store.list("requirements");
@@ -575,42 +1005,68 @@ router.get(
       }
       if (req.user.role === "admin" || isProducer) {
         const harvests = await store.list("expectedHarvests");
-        data.expectedHarvests = req.user.role === "admin"
-          ? harvests
-          : harvests.filter((h) => [seller?.id, req.user.sub].includes(h.sellerId));
+        data.expectedHarvests =
+          req.user.role === "admin"
+            ? harvests
+            : harvests.filter((h) =>
+                [seller?.id, req.user.sub].includes(h.sellerId),
+              );
       }
       if (req.user.role === "admin")
         data.quotations = await store.list("quotations");
       else if (isProducer && seller)
-        data.quotations = await store.list("quotations", { sellerId: seller.id });
+        data.quotations = await store.list("quotations", {
+          sellerId: seller.id,
+        });
       else if (canProcure) {
         const quotes = await store.list("quotations");
         data.quotations = quotes.filter((q) =>
           data.requirements.some((r) => r._id === q.requirementId),
         );
       }
-      if (["consumer", "business_buyer", "farmer", "fpo_manager", "admin"].includes(req.user.role)) {
+      if (
+        [
+          "consumer",
+          "business_buyer",
+          "farmer",
+          "fpo_manager",
+          "admin",
+        ].includes(req.user.role)
+      ) {
         const orders = await store.list("orders");
-        data.orders = req.user.role === "admin"
-          ? orders
-          : orders.filter(
-              (o) => o.buyerId === req.user.sub || o.sellerId === seller?.id,
-            );
+        data.orders =
+          req.user.role === "admin"
+            ? orders
+            : orders.filter(
+                (o) => o.buyerId === req.user.sub || o.sellerId === seller?.id,
+              );
       }
-      if (["driver", "logistics_partner", "logistics", "admin"].includes(req.user.role)) {
+      if (
+        ["driver", "logistics_partner", "logistics", "admin"].includes(
+          req.user.role,
+        )
+      ) {
         const shipments = await store.list("shipments");
-        data.shipments = req.user.role === "driver"
-          ? shipments.filter((shipment) => shipment.driverUserId === req.user.sub)
-          : shipments;
+        data.shipments =
+          req.user.role === "driver"
+            ? shipments.filter(
+                (shipment) => shipment.driverUserId === req.user.sub,
+              )
+            : shipments;
       } else if (isProducer) {
         const orderIds = new Set(data.orders.map((order) => order._id));
-        data.shipments = (await store.list("shipments"))
-          .filter((shipment) => shipmentBelongsToOrders(shipment, orderIds));
+        data.shipments = (await store.list("shipments")).filter((shipment) =>
+          shipmentBelongsToOrders(shipment, orderIds),
+        );
       }
       data.notifications = await store.list("notifications", {
         userId: req.user.sub,
       });
-      if (["driver", "logistics_partner", "logistics", "admin"].includes(req.user.role))
+      if (
+        ["driver", "logistics_partner", "logistics", "admin"].includes(
+          req.user.role,
+        )
+      )
         data.vehicles = await store.list("vehicles");
     }
     ok(res, data, { storage: store.mode, providers });
@@ -651,14 +1107,14 @@ router.post(
     let seller = sellerForUser(sellers, req.user.sub);
     if (!seller) {
       seller = {
-      id: req.user.sub,
-      userId: req.user.sub,
-      name: req.user.name,
-      type: req.user.role === "fpo_manager" ? "FPO" : "Farmer",
-      location: req.body.locationName,
-      rating: 5,
-      reliability: 100,
-      verified: true,
+        id: req.user.sub,
+        userId: req.user.sub,
+        name: req.user.name,
+        type: req.user.role === "fpo_manager" ? "FPO" : "Farmer",
+        location: req.body.locationName,
+        rating: 5,
+        reliability: 100,
+        verified: true,
       };
       await store.create("sellers", seller, "seller");
     }
@@ -675,9 +1131,7 @@ router.post(
         reviews: 0,
         featured: false,
         coordinates: seller.coordinates || [85.8245, 20.2961],
-        image:
-          req.body.image ||
-          "https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=1200&q=82",
+        image: req.body.image?.trim() || fallbackProduceImage,
       },
       "prod",
     );
@@ -717,6 +1171,34 @@ router.get(
     const p = await store.get("products", req.params.id);
     if (!p) throw new HttpError(404, "Product not found");
     ok(res, p);
+  }),
+);
+router.patch(
+  "/products/:id",
+  requireAuth,
+  allowRoles("farmer", "fpo_manager", "admin"),
+  validate(productUpdateSchema),
+  asyncHandler(async (req, res) => {
+    const product = await store.get("products", req.params.id);
+    if (!product) throw new HttpError(404, "Product not found");
+    if (req.user.role !== "admin") {
+      const seller = (await store.list("sellers")).find(
+        (item) => item.userId === req.user.sub,
+      );
+      const keys = [seller?._id, seller?.id, req.user.sub].filter(Boolean);
+      if (!keys.includes(product.sellerId))
+        throw new HttpError(403, "You can only edit your own listings");
+    }
+    const changes = { ...req.body };
+    // An empty string here means "clear it", which would leave a blank card, so
+    // fall back to the produce placeholder instead of storing nothing.
+    if ("image" in changes && !changes.image.trim())
+      changes.image = fallbackProduceImage;
+    if (changes.name)
+      changes.slug = changes.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    const updated = await store.update("products", req.params.id, changes);
+    emit(req, "product:updated", { productId: updated._id });
+    ok(res, updated);
   }),
 );
 router.get(
@@ -824,14 +1306,17 @@ router.get(
   allowRoles("farmer", "fpo_manager", "admin"),
   asyncHandler(async (req, res) => {
     const lots = await store.list("lots");
-    const seller = req.user.role === "admin"
-      ? null
-      : (await store.list("sellers")).find((s) => s.userId === req.user.sub);
+    const seller =
+      req.user.role === "admin"
+        ? null
+        : (await store.list("sellers")).find((s) => s.userId === req.user.sub);
     ok(
       res,
-      lots.filter((l) =>
-        ["FRESH", "SELL_SOON", "URGENT"].includes(l.freshnessState) &&
-        (req.user.role === "admin" || [seller?.id, req.user.sub].includes(l.sellerId)),
+      lots.filter(
+        (l) =>
+          ["FRESH", "SELL_SOON", "URGENT"].includes(l.freshnessState) &&
+          (req.user.role === "admin" ||
+            [seller?.id, req.user.sub].includes(l.sellerId)),
       ),
     );
   }),
@@ -852,24 +1337,44 @@ router.get(
       await store.list("priceSnapshots", { productId: req.params.productId })
     ).sort((a, b) => new Date(a.date) - new Date(b.date));
     const latest = history.at(-1) || {};
+    const mandi = await fetchMandiBenchmarks(product.name);
+    const demandCount = (await store.list("requirements")).filter(
+      (requirement) =>
+        String(requirement.product || "")
+          .toLowerCase()
+          .includes(product.name.toLowerCase()),
+    ).length;
+    const recommendation = priceRecommendation({
+      baseline: latest.localReference || product.bulkPrice,
+      marketBenchmark: mandi?.benchmark,
+      demandCount,
+    });
     ok(res, {
       product,
       history,
       summary: {
         marketplaceMedian: latest.marketplaceMedian || product.bulkPrice,
-        localReference: latest.localReference || product.bulkPrice * 1.03,
+        localReference:
+          mandi?.benchmark || latest.localReference || product.bulkPrice * 1.03,
         sellerAverage: latest.sellerAverage || product.bulkPrice * 0.98,
         range: [
           Number((product.bulkPrice * 0.97).toFixed(1)),
           Number((product.bulkPrice * 1.08).toFixed(1)),
         ],
-        source: latest.source || "Kishan Bhaiya seeded reference provider",
-        timestamp: latest.date || new Date().toISOString(),
+        source:
+          mandi?.source ||
+          latest.source ||
+          "KisanExpress seeded reference provider",
+        timestamp: mandi?.timestamp || latest.date || new Date().toISOString(),
         indicative: true,
+        mandiRecords: mandi?.records || 0,
+        recommendation,
       },
     });
   }),
 );
+
+registerUrbanStoreRoutes(router);
 
 router.get(
   "/orders",
@@ -894,8 +1399,12 @@ router.get(
     if (!order) throw new HttpError(404, "Order not found");
     const sellers = await store.list("sellers");
     const seller = sellers.find((s) => s.id === order.sellerId);
-    const allSuborders = await store.list("subFulfillments", { orderId: order._id });
-    const ownedSeller = sellers.find((candidate) => candidate.userId === req.user.sub);
+    const allSuborders = await store.list("subFulfillments", {
+      orderId: order._id,
+    });
+    const ownedSeller = sellers.find(
+      (candidate) => candidate.userId === req.user.sub,
+    );
     const sellerSuborders = ownedSeller
       ? allSuborders.filter((suborder) => suborder.sellerId === ownedSeller.id)
       : [];
@@ -908,19 +1417,25 @@ router.get(
       throw new HttpError(403, "You do not have access to this order");
     const shipmentIds = order.shipmentIds?.length
       ? order.shipmentIds
-      : order.shipmentId ? [order.shipmentId] : [];
-    const shipments = (await Promise.all(shipmentIds.map((shipmentId) => store.get("shipments", shipmentId))))
-      .filter(Boolean);
-    const suborders = order.buyerId === req.user.sub || req.user.role === "admin"
-      ? allSuborders
-      : sellerSuborders;
+      : order.shipmentId
+        ? [order.shipmentId]
+        : [];
+    const shipments = (
+      await Promise.all(
+        shipmentIds.map((shipmentId) => store.get("shipments", shipmentId)),
+      )
+    ).filter(Boolean);
+    const suborders =
+      order.buyerId === req.user.sub || req.user.role === "admin"
+        ? allSuborders
+        : sellerSuborders;
     ok(res, { ...order, shipment: shipments[0] || null, shipments, suborders });
   }),
 );
 router.post(
   "/orders",
   requireAuth,
-  allowRoles("consumer", "business_buyer"),
+  allowRoles("consumer"),
   asyncHandler(async (req, res) => {
     if (!Array.isArray(req.body.items) || !req.body.items.length)
       throw new HttpError(400, "Your cart is empty");
@@ -936,6 +1451,7 @@ router.post(
       const products = await Promise.all(
         req.body.items.map((i) => store.get("products", i.productId, session)),
       );
+      const sellers = await store.list("sellers", {}, session);
       let subtotal = 0;
       const items = [];
       for (let i = 0; i < products.length; i++) {
@@ -953,6 +1469,9 @@ router.post(
             ? product.bulkPrice
             : product.retailPrice;
         subtotal += price * quantity;
+        const seller = sellers.find((candidate) =>
+          sellerKeys(candidate).includes(product.sellerId),
+        );
         items.push({
           productId: product._id,
           name: product.name,
@@ -960,6 +1479,11 @@ router.post(
           quantity,
           price,
           unit: product.unit,
+          // Stamped at order time so the line can be routed to the right
+          // producer for approval even if the product is edited or delisted later.
+          sellerId: product.sellerId,
+          sellerName: seller?.name || "",
+          approvalStatus: "PENDING",
         });
       }
       const deliveryFee = subtotal >= 799 ? 0 : 49,
@@ -974,7 +1498,10 @@ router.post(
           subtotal,
           deliveryFee,
           total,
-          status: "CONFIRMED",
+          // The producer decides. Nothing ships, and no delivery is promised,
+          // until every seller on the basket has accepted their own lines.
+          status: "PENDING_SELLER",
+          requestedAt: new Date().toISOString(),
           paymentStatus:
             req.body.paymentMethod === "COD" ? "COD_PENDING" : "PAID_MOCK",
           paymentProvider: providers.payment.name,
@@ -986,10 +1513,18 @@ router.post(
       );
       for (const item of items) {
         const product = products.find((p) => p._id === item.productId);
+        // Stock leaves `availableQuantity` immediately — that is what stops two
+        // buyers claiming the same lot while a farmer is deciding. `reservedQuantity`
+        // records how much of that is still provisional, so a rejection can put it
+        // back and the producer can see what is awaiting their answer.
         await store.update(
           "products",
           product._id,
-          { availableQuantity: product.availableQuantity - item.quantity },
+          {
+            availableQuantity: product.availableQuantity - item.quantity,
+            reservedQuantity:
+              Number(product.reservedQuantity || 0) + item.quantity,
+          },
           session,
         );
       }
@@ -1007,6 +1542,29 @@ router.post(
       );
       return created;
     });
+    // Every producer with a line on this basket needs to know it is waiting.
+    for (const seller of await sellersForOrder(order)) {
+      if (!seller.userId) continue;
+      const lines = itemsForSeller(order, seller);
+      if (!lines.length) continue;
+      await store.create(
+        "notifications",
+        {
+          userId: seller.userId,
+          title: "New order needs your confirmation",
+          message: `${lines.map((line) => `${line.quantity}${line.unit} ${line.name}`).join(", ")} — accept or decline so the buyer knows.`,
+          type: "ORDER_AWAITING_SELLER",
+          entityId: order._id,
+          actionPath: "/seller/orders",
+          read: false,
+        },
+        "note",
+      );
+      emit(req, "notification:new", {
+        type: "ORDER_AWAITING_SELLER",
+        orderId: order._id,
+      });
+    }
     emit(req, "order:statusChanged", order);
     ok(res, order);
   }),
@@ -1019,9 +1577,14 @@ router.post(
     const order = await store.get("orders", req.params.id);
     if (!order) throw new HttpError(404, "Order not found");
     if (req.user.role !== "admin") {
-      const seller = (await store.list("sellers")).find((s) => s.userId === req.user.sub);
+      const seller = (await store.list("sellers")).find(
+        (s) => s.userId === req.user.sub,
+      );
       if (!seller || order.sellerId !== seller.id)
-        throw new HttpError(403, "Only the assigned seller can report a shortage");
+        throw new HttpError(
+          403,
+          "Only the assigned seller can report a shortage",
+        );
     }
     const missingQuantity = Number(req.body.missingQuantity);
     if (!missingQuantity || missingQuantity <= 0)
@@ -1071,575 +1634,485 @@ router.post(
   }),
 );
 
+/**
+ * A producer's inbox. Retail orders are gated on seller approval, so this is
+ * where a farmer or FPO manager actually discovers that somebody has bought from
+ * them. Only the caller's own lines are returned: another seller's prices on the
+ * same basket are none of their business, and neither is the basket total.
+ */
 router.get(
-  "/bulk-requirements",
+  "/seller/orders",
   requireAuth,
-  allowRoles("business_buyer", "farmer", "fpo_manager", "admin"),
+  allowRoles("farmer", "fpo_manager"),
   asyncHandler(async (req, res) => {
-    const requirements = await store.list("requirements");
-    ok(res, req.user.role === "business_buyer"
-      ? requirements.filter((r) => r.buyerId === req.user.sub)
-      : requirements);
-  }),
-);
-router.post(
-  "/bulk-requirements",
-  requireAuth,
-  allowRoles("business_buyer"),
-  validate(requirementSchema),
-  asyncHandler(async (req, res) => {
-    const requirement = await store.create(
-      "requirements",
-      {
-        ...req.body,
-        buyerId: req.user.sub,
-        buyer: req.user.name,
-        status: "OPEN",
-        quotationsCount: 0,
-        coordinates: [85.8245, 20.2961],
-      },
-      "req",
-    );
-    emit(req, "notification:new", { type: "REQUIREMENT", requirement });
-    ok(res, requirement);
-  }),
-);
-router.get(
-  "/bulk-requirements/:id",
-  requireAuth,
-  allowRoles("business_buyer", "admin"),
-  asyncHandler(async (req, res) => {
-    const requirement = await store.get("requirements", req.params.id);
-    if (!requirement) throw new HttpError(404, "Requirement not found");
-    if (req.user.role !== "admin" && requirement.buyerId !== req.user.sub)
-      throw new HttpError(403, "Only the requirement owner can view procurement details");
-    const acceptedOrder = ["ACCEPTED", "PARTIALLY_FILLED"].includes(requirement.status)
-      ? await store.find("orders", { requirementId: requirement._id, type: "BULK_MULTI_SELLER" })
-      : null;
-    ok(res, acceptedOrder ? {
-      ...requirement,
-      acceptedOrderId: acceptedOrder._id,
-      acceptedAt: requirement.acceptedAt || acceptedOrder.createdAt,
-      acceptedSplitSummary: acceptedOrder.splitSummary,
-    } : requirement);
-  }),
-);
-router.get(
-  "/bulk-requirements/:id/matches",
-  requireAuth,
-  allowRoles("business_buyer", "admin"),
-  asyncHandler(async (req, res) => {
-    const requirement = await store.get("requirements", req.params.id);
-    if (!requirement) throw new HttpError(404, "Requirement not found");
-    if (req.user.role !== "admin" && requirement.buyerId !== req.user.sub)
-      throw new HttpError(403, "Only the requirement owner can view supplier matches");
-    const candidates = scoreCandidates(
-      requirement,
-      await store.list("products"),
-      await store.list("lots"),
-    );
+    const seller = sellerForUser(await store.list("sellers"), req.user.sub);
+    if (!seller)
+      return ok(res, {
+        orders: [],
+        summary: { pending: 0, accepted: 0, rejected: 0 },
+      });
+    const [orders, users, shipments] = await Promise.all([
+      store.list("orders"),
+      store.list("users"),
+      store.list("shipments"),
+    ]);
+    const rows = [];
+    for (const order of orders) {
+      const items = itemsForSeller(order, seller);
+      if (!items.length) continue;
+      const buyer = users.find((candidate) => candidate._id === order.buyerId);
+      const shipment = shipments.find((candidate) =>
+        shipmentBelongsToOrders(candidate, new Set([order._id])),
+      );
+      const pending = items.filter(
+        (item) => (item.approvalStatus || "PENDING") === "PENDING",
+      );
+      rows.push({
+        orderId: order._id,
+        orderStatus: order.status,
+        type: order.type,
+        placedAt: order.createdAt || order.requestedAt,
+        // A decision is only open while the order itself is still waiting; once
+        // it has settled or moved on, these lines are history.
+        awaitingDecision:
+          Boolean(pending.length) && order.status === "PENDING_SELLER",
+        decision: pending.length
+          ? "PENDING"
+          : items.every((item) => item.approvalStatus === "ACCEPTED")
+            ? "ACCEPTED"
+            : items.every((item) => item.approvalStatus === "REJECTED")
+              ? "REJECTED"
+              : "PARTIAL",
+        items,
+        itemCount: items.length,
+        quantity: sum(items, (item) => item.quantity),
+        subtotal: sum(items, (item) => item.price * item.quantity),
+        buyerName: buyer?.name || "Buyer",
+        deliveryAddress: order.deliveryAddress || "",
+        deliverySlot: order.deliverySlot || "",
+        rejectionReason:
+          items.find((item) => item.rejectionReason)?.rejectionReason || "",
+        shipmentStatus: shipment?.status || null,
+        nextStop: shipment?.nextStop?.label || null,
+        estimatedArrival: shipment?.estimatedArrival || null,
+      });
+    }
+    // Decisions the farmer still owes someone come first, newest within that.
+    rows.sort((a, b) => {
+      if (a.awaitingDecision !== b.awaitingDecision)
+        return a.awaitingDecision ? -1 : 1;
+      return new Date(b.placedAt || 0) - new Date(a.placedAt || 0);
+    });
     ok(res, {
-      candidates,
-      plan: buildFulfillmentPlan(requirement, candidates),
+      orders: rows,
+      summary: {
+        pending: rows.filter((row) => row.awaitingDecision).length,
+        accepted: rows.filter((row) => row.decision === "ACCEPTED").length,
+        rejected: rows.filter((row) => row.decision === "REJECTED").length,
+      },
     });
   }),
 );
+
+/**
+ * The confirm-or-decline action itself. A seller answers only for their own
+ * lines; the order settles once nobody is left to answer. Declining releases the
+ * stock that was held for those lines so it can be sold to somebody else.
+ */
 router.post(
-  "/bulk-requirements/:id/fulfillment-plans/accept",
+  "/orders/:id/seller-response",
   requireAuth,
-  allowRoles("business_buyer"),
+  allowRoles("farmer", "fpo_manager"),
+  validate(sellerResponseSchema),
   asyncHandler(async (req, res) => {
-    const result = await store.transaction(async (session) => {
-      const requirement = await store.get(
-        "requirements",
-        req.params.id,
-        session,
+    const seller = sellerForUser(await store.list("sellers"), req.user.sub);
+    if (!seller)
+      throw new HttpError(
+        403,
+        "This account is not linked to a producer profile",
       );
-      if (!requirement) throw new HttpError(404, "Requirement not found");
-      if (req.user.role !== "admin" && requirement.buyerId !== req.user.sub)
-        throw new HttpError(
-          403,
-          "Only the requirement owner can accept this plan",
-        );
-      if (["ACCEPTED", "PARTIALLY_FILLED"].includes(requirement.status)) {
-        const existingOrder = await store.find("orders", {
-          requirementId: requirement._id,
-          type: "BULK_MULTI_SELLER",
-        }, session);
-        if (!existingOrder) throw new HttpError(409, "This fulfillment plan has already been accepted");
-        const suborders = await store.list("subFulfillments", { orderId: existingOrder._id }, session);
-        const shipmentIds = existingOrder.shipmentIds?.length
-          ? existingOrder.shipmentIds
-          : existingOrder.shipmentId ? [existingOrder.shipmentId] : [];
-        const shipments = (await Promise.all(shipmentIds.map((shipmentId) => store.get("shipments", shipmentId, session)))).filter(Boolean);
-        return { ...existingOrder, suborders, shipments, idempotentReplay: true };
-      }
-      const candidates = scoreCandidates(
-        requirement,
-        await store.list("products", {}, session),
-        await store.list("lots", {}, session),
+    const order = await store.get("orders", req.params.id);
+    if (!order) throw new HttpError(404, "Order not found");
+    const mine = itemsForSeller(order, seller);
+    if (!mine.length)
+      throw new HttpError(403, "This order has no lines from your farm");
+    if (order.status !== "PENDING_SELLER")
+      throw new HttpError(
+        409,
+        `This order is already ${String(order.status).replaceAll("_", " ").toLowerCase()}`,
       );
-      const plan = buildFulfillmentPlan(requirement, candidates);
-      const requiredCoverage = requirement.allowPartial === false
-        ? 100
-        : requirement.minFillPercent;
-      if (plan.coveragePercent < requiredCoverage)
-        throw new HttpError(
-          409,
-          `Current plan covers ${plan.coveragePercent}%, below your ${requiredCoverage}% minimum`,
-        );
-      const order = await store.create(
-        "orders",
-        {
-          buyerId: req.user.sub,
-          type: "BULK_MULTI_SELLER",
-          requirementId: requirement._id,
-          status: "CONFIRMED",
-          paymentStatus: "PAYMENT_DUE",
-          total: plan.estimatedLandedTotal,
-          items: [
-            {
-              productId: requirement.productId,
-              name: requirement.product,
-              quantity: plan.filledQuantity,
-              unit: requirement.unit,
-            },
-          ],
-          fulfillmentPlan: {
-            coveragePercent: plan.coveragePercent,
-            method: plan.method,
-            requestedQuantity: plan.requestedQuantity,
-            filledQuantity: plan.filledQuantity,
-            missingQuantity: plan.missingQuantity,
-            supplierCount: plan.supplierCount,
-            splitRequired: plan.splitRequired,
-            allocations: plan.allocations.map((allocation) => ({
-              sellerId: allocation.sellerId,
-              sellerName: allocation.seller?.name,
-              quantity: allocation.quantity,
-              allocationPercent: allocation.allocationPercent,
-              pricePerUnit: allocation.price,
-              subtotal: allocation.subtotal,
-              estimatedTransport: allocation.estimatedTransport,
-              splitReason: allocation.splitReason,
-            })),
-          },
+    const open = mine.filter(
+      (item) => (item.approvalStatus || "PENDING") === "PENDING",
+    );
+    if (!open.length)
+      throw new HttpError(409, "You have already answered for these lines");
+
+    const accepted = req.body.action === "ACCEPT";
+    const keys = sellerKeys(seller);
+    const decidedAt = new Date().toISOString();
+    const items = (order.items || []).map((item) =>
+      keys.includes(item.sellerId) &&
+      (item.approvalStatus || "PENDING") === "PENDING"
+        ? {
+            ...item,
+            approvalStatus: accepted ? "ACCEPTED" : "REJECTED",
+            decidedAt,
+            ...(accepted ? {} : { rejectionReason: req.body.reason || "" }),
+          }
+        : item,
+    );
+    const settlement = settleOrderApproval({ ...order, items });
+
+    // Release the held stock for anything declined. Accepted lines keep the
+    // deduction made at checkout; they just stop being provisional.
+    for (const item of open) {
+      const product = await store.get("products", item.productId);
+      if (!product) continue;
+      await store.update("products", item.productId, {
+        reservedQuantity: Math.max(
+          0,
+          Number(product.reservedQuantity || 0) - item.quantity,
+        ),
+        ...(accepted
+          ? {}
+          : {
+              availableQuantity:
+                Number(product.availableQuantity || 0) + item.quantity,
+            }),
+      });
+    }
+
+    // Built key by key: an `undefined` in a mongo `$set` is treated
+    // inconsistently, so only the fields that actually changed are sent.
+    const patch = { items, status: settlement.status };
+    if (settlement.settled) {
+      patch.subtotal = settlement.subtotal;
+      patch.deliveryFee = settlement.deliveryFee;
+      patch.total = settlement.total;
+      if (settlement.status === "CONFIRMED") patch.confirmedAt = decidedAt;
+      else patch.cancelledAt = decidedAt;
+    }
+    const updated = await store.update("orders", order._id, patch);
+
+    const names = open.map((item) => item.name).join(", ");
+    await store.create(
+      "notifications",
+      {
+        userId: order.buyerId,
+        title: accepted
+          ? "Your order was confirmed"
+          : "Part of your order was declined",
+        message: accepted
+          ? `${seller.name} confirmed ${names}.`
+          : `${seller.name} cannot supply ${names}${req.body.reason ? `: ${req.body.reason}` : ""}. You have not been charged for it.`,
+        type: accepted ? "ORDER_SELLER_ACCEPTED" : "ORDER_SELLER_REJECTED",
+        entityId: order._id,
+        actionPath: `/orders/${order._id}`,
+        read: false,
+      },
+      "note",
+    );
+    await store.create(
+      "auditLogs",
+      {
+        actorId: req.user.sub,
+        action: accepted ? "ORDER_SELLER_ACCEPTED" : "ORDER_SELLER_REJECTED",
+        entityType: "Order",
+        entityId: order._id,
+        metadata: {
+          sellerId: seller._id || seller.id,
+          lines: open.length,
+          reason: req.body.reason || "",
+          orderStatus: settlement.status,
         },
-        "order",
-        session,
+      },
+      "audit",
+    );
+    emit(req, "order:statusChanged", updated);
+    emit(req, "notification:new", {
+      type: accepted ? "ORDER_SELLER_ACCEPTED" : "ORDER_SELLER_REJECTED",
+      orderId: order._id,
+    });
+    ok(res, {
+      orderId: order._id,
+      decision: accepted ? "ACCEPTED" : "REJECTED",
+      lines: open.length,
+      orderStatus: settlement.status,
+      settled: settlement.settled,
+    });
+  }),
+);
+
+/**
+ * Tells the buyer's review screen what it is allowed to ask for, so the UI never
+ * renders a form the POST below would reject. `reviewable` stays false until the
+ * order is DELIVERED — that is the whole point of the delivery gate.
+ */
+router.get(
+  "/orders/:id/review-eligibility",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const order = await store.get("orders", req.params.id);
+    if (!order) throw new HttpError(404, "Order not found");
+    if (order.buyerId !== req.user.sub && req.user.role !== "admin")
+      throw new HttpError(403, "Only the buyer of this order can review it");
+    const existing = await store.list("reviews", { orderId: order._id });
+    const sellers = await sellersForOrder(order);
+    ok(res, {
+      orderId: order._id,
+      status: order.status,
+      delivered: order.status === "DELIVERED",
+      reviewable: order.status === "DELIVERED" && !existing.length,
+      alreadyReviewed: existing.length > 0,
+      submittedAt: existing[0]?.createdAt || null,
+      sellers: sellers.map((seller) => ({
+        sellerId: seller._id || seller.id,
+        name: seller.name,
+        type: seller.type,
+        location: seller.location,
+        image: seller.image,
+      })),
+      items: (order.items || []).map((item) => ({
+        productId: item.productId,
+        name: item.name,
+        image: item.image,
+        quantity: item.quantity,
+        unit: item.unit,
+      })),
+    });
+  }),
+);
+
+router.post(
+  "/orders/:id/reviews",
+  requireAuth,
+  allowRoles("consumer", "business_buyer"),
+  validate(orderReviewSchema),
+  asyncHandler(async (req, res) => {
+    const order = await store.get("orders", req.params.id);
+    if (!order) throw new HttpError(404, "Order not found");
+    if (order.buyerId !== req.user.sub)
+      throw new HttpError(403, "Only the buyer of this order can review it");
+    if (order.status !== "DELIVERED")
+      throw new HttpError(
+        409,
+        "You can rate this order once it has been delivered",
       );
-      const suborders = [];
-      const shipmentAllocations = [];
-      const sellers = await store.list("sellers", {}, session);
-      for (const allocation of plan.allocations) {
-        let remaining = allocation.quantity;
-        const lotAllocations = [];
-        const lots = (
-          await store.list("lots", { sellerId: allocation.sellerId }, session)
-        )
-          .filter(
-            (l) =>
-              l.productId === requirement.productId && l.availableQuantity > 0,
-          )
-          .sort((a, b) => new Date(a.expiryDate) - new Date(b.expiryDate));
-        for (const lot of lots) {
-          const qty = Math.min(remaining, lot.availableQuantity);
-          if (!qty) continue;
-          await store.update(
-            "lots",
-            lot._id,
-            { availableQuantity: lot.availableQuantity - qty },
-            session,
-          );
-          lotAllocations.push({
-            lotId: lot._id,
-            lotCode: lot.lotCode,
-            quantity: qty,
-            expiryDate: lot.expiryDate,
-            coldChainRequired: Boolean(lot.coldChainRequired),
-          });
-          remaining -= qty;
-          if (!remaining) break;
-        }
-        if (remaining > 0)
-          throw new HttpError(409, `Supplier inventory changed; ${remaining}${requirement.unit} could not be reserved`);
-        const seller = sellers.find((candidate) => candidate.id === allocation.sellerId) || allocation.seller;
-        const suborder = await store.create(
-          "subFulfillments",
+    if ((await store.list("reviews", { orderId: order._id })).length)
+      throw new HttpError(409, "You have already reviewed this order");
+
+    const sellers = await sellersForOrder(order);
+    if (!sellers.length)
+      throw new HttpError(409, "This order has no seller to review");
+    const orderedProductIds = new Set(
+      (order.items || []).map((item) => item.productId),
+    );
+    const productRatings = (req.body.productRatings || []).filter((entry) =>
+      orderedProductIds.has(entry.productId),
+    );
+
+    const created = [];
+    for (const seller of sellers) {
+      created.push(
+        await store.create(
+          "reviews",
           {
             orderId: order._id,
-            sellerId: allocation.sellerId,
-            sellerName: seller?.name,
-            quantity: allocation.quantity,
-            unit: requirement.unit,
-            allocationPercent: allocation.allocationPercent,
-            pricePerUnit: allocation.price,
-            subtotal: allocation.subtotal,
-            estimatedTransport: allocation.estimatedTransport,
-            lotAllocations,
-            status: "RESERVED",
+            buyerId: req.user.sub,
+            sellerId: seller._id || seller.id,
+            productId: "",
+            rating: req.body.rating,
+            comment: req.body.comment,
+            tags: req.body.tags,
+            authorName: req.user.name,
+            verifiedPurchase: true,
           },
-          "suborder",
-          session,
-        );
-        suborders.push(suborder);
-        shipmentAllocations.push({
-          ...allocation,
-          seller,
-          coordinates: seller?.coordinates || allocation.coordinates,
-          subFulfillmentId: suborder._id,
-          coldChainRequired: lotAllocations.some((lot) => lot.coldChainRequired),
-        });
-        if (seller?.userId) await store.create("notifications", {
-          userId: seller.userId,
-          title: "Bulk allocation reserved",
-          message: `${allocation.quantity}${requirement.unit} of ${requirement.product} was allocated to your farm for order ${order._id}.`,
-          type: "BULK_ALLOCATION",
-          entityId: suborder._id,
-          read: false,
-        }, "note", session);
-      }
-      const [vehicles, users, hubs] = await Promise.all([
-        store.list("vehicles", {}, session),
-        store.list("users", {}, session),
-        store.list("hubs", {}, session),
-      ]);
-      const shipmentDrafts = buildShipmentDrafts({
-        orderId: order._id,
-        requirement,
-        allocations: shipmentAllocations,
-        vehicles,
-        drivers: users,
-        hubs,
-      });
-      const shipments = [];
-      for (const draft of shipmentDrafts) {
-        const shipment = await store.create("shipments", draft, "ship", session);
-        shipments.push(shipment);
-        if (shipment.vehicleId)
-          await store.update("vehicles", shipment.vehicleId, { status: "ASSIGNED", shipmentId: shipment._id }, session);
-        if (shipment.driverUserId) {
-          await store.update("users", shipment.driverUserId, { currentShipmentId: shipment._id }, session);
-          await store.create("notifications", {
-            userId: shipment.driverUserId,
-            title: "New optimized trip assigned",
-            message: `${shipment.load}${requirement.unit} · ${shipment.stops.length} stops · next: ${shipment.nextStop?.label || "open trip"}.`,
-            type: "SHIPMENT_ASSIGNED",
-            entityId: shipment._id,
-            read: false,
-          }, "note", session);
-        }
-      }
-      const updatedOrder = await store.update("orders", order._id, {
-        shipmentId: shipments[0]?._id || null,
-        shipmentIds: shipments.map((shipment) => shipment._id),
-        splitSummary: {
-          supplierCount: suborders.length,
-          shipmentCount: shipments.length,
-          autoDispatchedCount: shipments.filter((shipment) => !shipment.dispatchRequired).length,
-          allocations: suborders.map((suborder) => ({
-            subFulfillmentId: suborder._id,
-            sellerId: suborder.sellerId,
-            sellerName: suborder.sellerName,
-            quantity: suborder.quantity,
-            allocationPercent: suborder.allocationPercent,
-            status: suborder.status,
-          })),
-        },
-      }, session);
-      await store.update(
-        "requirements",
-        requirement._id,
-        {
-          status:
-            plan.coveragePercent === 100 ? "ACCEPTED" : "PARTIALLY_FILLED",
-          acceptedOrderId: updatedOrder._id,
-          acceptedAt: new Date().toISOString(),
-          acceptedSplitSummary: updatedOrder.splitSummary,
-        },
-        session,
+          "review",
+        ),
       );
-      await store.create(
+    }
+    const products = await store.list("products");
+    for (const entry of productRatings) {
+      const product = products.find(
+        (candidate) => candidate._id === entry.productId,
+      );
+      created.push(
+        await store.create(
+          "reviews",
+          {
+            orderId: order._id,
+            buyerId: req.user.sub,
+            sellerId: product?.sellerId || sellers[0]._id || sellers[0].id,
+            productId: entry.productId,
+            rating: entry.rating,
+            comment: entry.comment,
+            tags: [],
+            authorName: req.user.name,
+            verifiedPurchase: true,
+          },
+          "review",
+        ),
+      );
+    }
+
+    // Product aggregates first: the seller roll-up rewrites the denormalised
+    // `products[].seller` snapshot and would otherwise be clobbered.
+    for (const entry of productRatings)
+      await recomputeProductRating(entry.productId);
+    for (const seller of sellers)
+      await recomputeSellerRating(seller._id || seller.id);
+
+    await Promise.all([
+      ...sellers
+        .filter((seller) => seller.userId)
+        .map((seller) =>
+          store.create(
+            "notifications",
+            {
+              userId: seller.userId,
+              title: `New ${req.body.rating}★ review`,
+              message: req.body.comment
+                ? `${req.user.name}: “${req.body.comment.slice(0, 120)}”`
+                : `${req.user.name} rated your produce ${req.body.rating} out of 5.`,
+              type: "REVIEW_RECEIVED",
+              entityId: order._id,
+              read: false,
+            },
+            "note",
+          ),
+        ),
+      store.create(
         "auditLogs",
         {
           actorId: req.user.sub,
-          action: "MULTI_SELLER_PLAN_ACCEPTED",
-          entityType: "BulkRequirement",
-          entityId: requirement._id,
+          action: "ORDER_REVIEWED",
+          entityType: "Order",
+          entityId: order._id,
           metadata: {
-            orderId: updatedOrder._id,
-            suborders: suborders.map((s) => s._id),
-            shipments: shipments.map((shipment) => shipment._id),
-            automaticSplit: true,
+            rating: req.body.rating,
+            products: productRatings.length,
           },
         },
         "audit",
-        session,
-      );
-      return { ...updatedOrder, suborders, shipments };
+      ),
+    ]);
+    emit(req, "review:created", {
+      orderId: order._id,
+      rating: req.body.rating,
     });
-    emit(req, "order:statusChanged", result);
-    ok(res, result);
-  }),
-);
-router.get(
-  "/bulk-requirements/:id/quotations",
-  requireAuth,
-  allowRoles("business_buyer", "admin"),
-  asyncHandler(async (req, res) => {
-    const requirement = await store.get("requirements", req.params.id);
-    if (!requirement) throw new HttpError(404, "Requirement not found");
-    if (req.user.role !== "admin" && requirement.buyerId !== req.user.sub)
-      throw new HttpError(403, "Only the requirement owner can compare quotations");
-    ok(res, await store.list("quotations", { requirementId: req.params.id }));
-  }),
-);
-router.post(
-  "/bulk-requirements/:id/quotations",
-  requireAuth,
-  allowRoles("farmer", "fpo_manager"),
-  validate(quotationSchema),
-  asyncHandler(async (req, res) => {
-    const requirement = await store.get("requirements", req.params.id);
-    if (!requirement) throw new HttpError(404, "Requirement not found");
-    const sellers = await store.list("sellers");
-    const seller = sellers.find((s) => s.userId === req.user.sub) || {
-      id: req.user.sub,
-      name: req.user.name,
-      type: req.user.role === "fpo_manager" ? "FPO" : "Farmer",
-      rating: 5,
-      reliability: 100,
-    };
-    const quote = await store.create(
-      "quotations",
-      {
-        ...req.body,
-        requirementId: requirement._id,
-        sellerId: seller.id,
-        seller,
-        status: "SENT",
-      },
-      "quote",
-    );
-    await store.update("requirements", requirement._id, {
-      status: "QUOTES_RECEIVED",
-      quotationsCount: (requirement.quotationsCount || 0) + 1,
-    });
-    emit(req, "quotation:new", quote);
-    ok(res, quote);
+    ok(res, { orderId: order._id, reviews: created });
   }),
 );
 
 router.get(
-  "/quotations/:id",
-  requireAuth,
+  "/products/:id/reviews",
   asyncHandler(async (req, res) => {
-    const quote = await store.get("quotations", req.params.id);
-    if (!quote) throw new HttpError(404, "Quotation not found");
-    const requirement = await store.get("requirements", quote.requirementId);
-    const seller = await store.find("sellers", { id: quote.sellerId });
-    if (
-      req.user.role !== "admin" &&
-      requirement.buyerId !== req.user.sub &&
-      seller?.userId !== req.user.sub
-    )
-      throw new HttpError(403, "You do not have access to this quotation");
-    const negotiation = await store.find("negotiations", {
-      quotationId: quote._id,
-    });
-    ok(res, { quote, negotiation, requirement });
-  }),
-);
-router.post(
-  "/quotations/:id/counter",
-  requireAuth,
-  allowRoles("business_buyer", "farmer", "fpo_manager"),
-  validate(counterSchema),
-  asyncHandler(async (req, res) => {
-    const quote = await store.get("quotations", req.params.id);
-    if (!quote) throw new HttpError(404, "Quotation not found");
-    const requirement = await store.get("requirements", quote.requirementId);
-    const seller = await store.find("sellers", { id: quote.sellerId });
-    if (
-      req.user.role !== "admin" &&
-      requirement.buyerId !== req.user.sub &&
-      seller?.userId !== req.user.sub
-    )
-      throw new HttpError(403, "Only quotation participants can counter");
-    let negotiation = await store.find("negotiations", {
-      quotationId: quote._id,
-    });
-    const offer = {
-      id: id("offer"),
-      sender: req.user.name,
-      senderRole: ["farmer", "fpo_manager"].includes(req.user.role)
-        ? "seller"
-        : "buyer",
-      ...req.body,
-      createdAt: new Date().toISOString(),
-      current: true,
-    };
-    if (!negotiation)
-      negotiation = await store.create(
-        "negotiations",
-        { quotationId: quote._id, status: "ACTIVE", offers: [offer] },
-        "neg",
-      );
-    else {
-      const offers = negotiation.offers.map((o) => ({ ...o, current: false }));
-      negotiation = await store.update("negotiations", negotiation._id, {
-        offers: [...offers, offer],
-        status: "ACTIVE",
-      });
-    }
-    await store.update("quotations", quote._id, { status: "NEGOTIATING" });
-    emit(req, "negotiation:countered", { quotationId: quote._id, offer });
-    ok(res, negotiation);
-  }),
-);
-router.post(
-  "/quotations/:id/accept",
-  requireAuth,
-  allowRoles("business_buyer"),
-  asyncHandler(async (req, res) => {
-    const result = await store.transaction(async (session) => {
-      const quote = await store.get("quotations", req.params.id, session);
-      if (!quote) throw new HttpError(404, "Quotation not found");
-      if (quote.status === "ACCEPTED")
-        throw new HttpError(409, "This quotation is already accepted");
-      const requirement = await store.get(
-        "requirements",
-        quote.requirementId,
-        session,
-      );
-      if (req.user.role !== "admin" && requirement.buyerId !== req.user.sub)
-        throw new HttpError(
-          403,
-          "Only the requirement owner can accept this quotation",
-        );
-      const negotiation = await store.find(
-        "negotiations",
-        { quotationId: quote._id },
-        session,
-      );
-      const terms = negotiation?.offers?.at(-1) || quote;
-      const lots = (
-        await store.list("lots", { sellerId: quote.sellerId }, session)
-      )
-        .filter(
-          (l) =>
-            l.productId === requirement.productId && l.availableQuantity > 0,
-        )
-        .sort((a, b) => new Date(a.expiryDate) - new Date(b.expiryDate));
-      const available = lots.reduce((n, l) => n + l.availableQuantity, 0);
-      if (available < terms.quantity)
-        throw new HttpError(
-          409,
-          `Only ${available}${requirement.unit} is currently reservable from this seller`,
-        );
-      let remaining = terms.quantity;
-      for (const lot of lots) {
-        const allocated = Math.min(remaining, lot.availableQuantity);
-        if (allocated) {
-          await store.update(
-            "lots",
-            lot._id,
-            { availableQuantity: lot.availableQuantity - allocated },
-            session,
-          );
-          remaining -= allocated;
-        }
-        if (!remaining) break;
-      }
-      const total =
-        terms.pricePerUnit * terms.quantity + (terms.transportCost || 0);
-      const order = await store.create(
-        "orders",
-        {
-          buyerId: req.user.sub,
-          sellerId: quote.sellerId,
-          type: "BULK",
-          requirementId: requirement._id,
-          quotationId: quote._id,
-          status: "CONFIRMED",
-          paymentStatus: "PAYMENT_DUE",
-          total,
-          items: [
-            {
-              productId: requirement.productId,
-              name: requirement.product,
-              quantity: terms.quantity,
-              price: terms.pricePerUnit,
-              unit: requirement.unit,
-            },
-          ],
-          acceptedTerms: terms,
+    const reviews = await store.list("reviews", { productId: req.params.id });
+    const sorted = [...reviews].sort((a, b) =>
+      String(b.createdAt).localeCompare(String(a.createdAt)),
+    );
+    const product = await store.get("products", req.params.id);
+    ok(res, {
+      reviews: sorted,
+      summary: {
+        count: sorted.length,
+        average: averageRating(sorted),
+        displayed: {
+          rating: product?.rating ?? 0,
+          reviews: product?.reviews ?? 0,
         },
-        "order",
-        session,
-      );
-      await store.update(
-        "quotations",
-        quote._id,
-        { status: "ACCEPTED" },
-        session,
-      );
-      await store.update(
-        "requirements",
-        requirement._id,
-        { status: "ACCEPTED" },
-        session,
-      );
-      if (negotiation)
-        await store.update(
-          "negotiations",
-          negotiation._id,
-          { status: "ACCEPTED" },
-          session,
-        );
-      await store.create(
-        "auditLogs",
-        {
-          actorId: req.user.sub,
-          action: "QUOTATION_ACCEPTED",
-          entityType: "Quotation",
-          entityId: quote._id,
-          metadata: { orderId: order._id, total },
-        },
-        "audit",
-        session,
-      );
-      return { quote, order };
+        distribution: [5, 4, 3, 2, 1].map((star) => ({
+          star,
+          count: sorted.filter((review) => Number(review.rating) === star)
+            .length,
+        })),
+      },
     });
-    emit(req, "negotiation:accepted", {
-      quotationId: result.quote._id,
-      order: result.order,
-    });
-    ok(res, result.order);
   }),
 );
-router.post(
-  "/quotations/:id/reject",
-  requireAuth,
-  allowRoles("business_buyer", "farmer", "fpo_manager"),
+
+router.get(
+  "/sellers/:id/reviews",
   asyncHandler(async (req, res) => {
-    const existing = await store.get("quotations", req.params.id);
-    if (!existing) throw new HttpError(404, "Quotation not found");
-    const requirement = await store.get("requirements", existing.requirementId);
-    const seller = await store.find("sellers", { id: existing.sellerId });
-    if (
-      req.user.role !== "admin" &&
-      requirement.buyerId !== req.user.sub &&
-      seller?.userId !== req.user.sub
-    )
-      throw new HttpError(403, "Only quotation participants can reject");
-    const quote = await store.update("quotations", req.params.id, {
-      status: "REJECTED",
+    const sellers = await store.list("sellers");
+    const seller = sellers.find((candidate) =>
+      sellerKeys(candidate).includes(req.params.id),
+    );
+    if (!seller) throw new HttpError(404, "Seller not found");
+    const keys = sellerKeys(seller);
+    const reviews = (await store.list("reviews", {}))
+      .filter((review) => keys.includes(review.sellerId) && !review.productId)
+      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    ok(res, {
+      reviews,
+      summary: {
+        count: reviews.length,
+        average: averageRating(reviews),
+        displayed: { rating: seller.rating ?? 0, reviews: seller.reviews ?? 0 },
+      },
     });
-    emit(req, "quotation:updated", quote);
-    ok(res, quote);
   }),
 );
+
+/**
+ * Feedback about the marketplace itself, collected right after checkout while
+ * the experience is still fresh. Deliberately not tied to a delivered order.
+ */
+router.post(
+  "/platform-feedback",
+  requireAuth,
+  validate(platformFeedbackSchema),
+  asyncHandler(async (req, res) => {
+    const created = await store.create(
+      "platformFeedback",
+      {
+        userId: req.user.sub,
+        role: req.user.role,
+        orderId: req.body.orderId,
+        rating: req.body.rating,
+        comment: req.body.comment,
+        tags: req.body.tags,
+      },
+      "pfb",
+    );
+    await store.create(
+      "auditLogs",
+      {
+        actorId: req.user.sub,
+        action: "PLATFORM_FEEDBACK_SUBMITTED",
+        entityType: "PlatformFeedback",
+        entityId: created._id,
+        metadata: { rating: req.body.rating },
+      },
+      "audit",
+    );
+    ok(res, created);
+  }),
+);
+
+router.get(
+  "/platform-feedback",
+  requireAuth,
+  allowRoles("admin"),
+  asyncHandler(async (_req, res) => {
+    const rows = (await store.list("platformFeedback", {})).sort((a, b) =>
+      String(b.createdAt).localeCompare(String(a.createdAt)),
+    );
+    ok(res, {
+      feedback: rows,
+      summary: {
+        count: rows.length,
+        average: averageRating(rows),
+        distribution: [5, 4, 3, 2, 1].map((star) => ({
+          star,
+          count: rows.filter((row) => Number(row.rating) === star).length,
+        })),
+      },
+    });
+  }),
+);
+
+registerBulkProcurementRoutes(router);
 
 router.get(
   "/expected-harvests",
@@ -1648,8 +2121,13 @@ router.get(
   asyncHandler(async (req, res) => {
     const harvests = await store.list("expectedHarvests");
     if (req.user.role === "admin") return ok(res, harvests);
-    const seller = (await store.list("sellers")).find((s) => s.userId === req.user.sub);
-    ok(res, harvests.filter((h) => [seller?.id, req.user.sub].includes(h.sellerId)));
+    const seller = (await store.list("sellers")).find(
+      (s) => s.userId === req.user.sub,
+    );
+    ok(
+      res,
+      harvests.filter((h) => [seller?.id, req.user.sub].includes(h.sellerId)),
+    );
   }),
 );
 router.post(
@@ -1658,19 +2136,24 @@ router.post(
   allowRoles("farmer", "fpo_manager"),
   validate(harvestSchema),
   asyncHandler(async (req, res) => {
-    const seller = (await store.list("sellers")).find((s) => s.userId === req.user.sub);
-    ok(res, await store.create(
-      "expectedHarvests",
-      {
-        ...req.body,
-        sellerId: seller?.id || req.user.sub,
-        reservedQuantity: 0,
-        status: "UPCOMING",
-        unit: "kg",
-        interestedBuyers: 0,
-      },
-      "harvest",
-    ));
+    const seller = (await store.list("sellers")).find(
+      (s) => s.userId === req.user.sub,
+    );
+    ok(
+      res,
+      await store.create(
+        "expectedHarvests",
+        {
+          ...req.body,
+          sellerId: seller?.id || req.user.sub,
+          reservedQuantity: 0,
+          status: "UPCOMING",
+          unit: "kg",
+          interestedBuyers: 0,
+        },
+        "harvest",
+      ),
+    );
   }),
 );
 router.post(
@@ -1715,9 +2198,14 @@ router.post(
     const harvest = await store.get("expectedHarvests", req.params.id);
     if (!harvest) throw new HttpError(404, "Expected harvest not found");
     if (req.user.role !== "admin") {
-      const seller = (await store.list("sellers")).find((s) => s.userId === req.user.sub);
+      const seller = (await store.list("sellers")).find(
+        (s) => s.userId === req.user.sub,
+      );
       if (![seller?.id, req.user.sub].includes(harvest.sellerId))
-        throw new HttpError(403, "Only the harvest owner can convert this record");
+        throw new HttpError(
+          403,
+          "Only the harvest owner can convert this record",
+        );
     }
     if (harvest.status === "CONVERTED")
       throw new HttpError(409, "This harvest has already been converted");
@@ -1768,9 +2256,14 @@ router.post(
     const lot = await store.get("lots", req.params.id);
     if (!lot) throw new HttpError(404, "Lot not found");
     if (req.user.role !== "admin") {
-      const seller = (await store.list("sellers")).find((s) => s.userId === req.user.sub);
+      const seller = (await store.list("sellers")).find(
+        (s) => s.userId === req.user.sub,
+      );
       if (![seller?.id, req.user.sub].includes(lot.sellerId))
-        throw new HttpError(403, "Only the lot owner can create a rescue offer");
+        throw new HttpError(
+          403,
+          "Only the lot owner can create a rescue offer",
+        );
     }
     const price = Number(req.body.price || lot.suggestedPrice);
     if (price <= 0) throw new HttpError(400, "Enter a valid promotional price");
@@ -1803,42 +2296,7 @@ router.post(
   }),
 );
 
-router.get(
-  "/recurring-requirements",
-  requireAuth,
-  allowRoles("business_buyer", "admin"),
-  asyncHandler(async (req, res) => ok(res, await store.list(
-    "recurring",
-    req.user.role === "admin" ? {} : { buyerId: req.user.sub },
-  ))),
-);
-router.post(
-  "/recurring-requirements",
-  requireAuth,
-  allowRoles("business_buyer"),
-  asyncHandler(async (req, res) =>
-    ok(
-      res,
-      await store.create(
-        "recurring",
-        { ...req.body, buyerId: req.user.sub, status: "ACTIVE" },
-        "recurring",
-      ),
-    ),
-  ),
-);
-router.patch(
-  "/recurring-requirements/:id",
-  requireAuth,
-  allowRoles("business_buyer"),
-  asyncHandler(async (req, res) => {
-    const recurring = await store.get("recurring", req.params.id);
-    if (!recurring) throw new HttpError(404, "Recurring requirement not found");
-    if (req.user.role !== "admin" && recurring.buyerId !== req.user.sub)
-      throw new HttpError(403, "Only the recurring requirement owner can change it");
-    ok(res, await store.update("recurring", req.params.id, req.body));
-  }),
-);
+registerRecurringProcurementRoutes(router);
 router.get(
   "/fpo/members",
   requireAuth,
@@ -1847,7 +2305,10 @@ router.get(
     const managedFpo = (await store.list("sellers")).find(
       (seller) => seller.type === "FPO" && seller.userId === req.user.sub,
     );
-    ok(res, managedFpo ? await store.list("members", { fpoId: managedFpo.id }) : []);
+    ok(
+      res,
+      managedFpo ? await store.list("members", { fpoId: managedFpo.id }) : [],
+    );
   }),
 );
 router.get(
@@ -1857,16 +2318,27 @@ router.get(
   asyncHandler(async (_req, res) => {
     const fpos = (await store.list("sellers"))
       .filter((seller) => seller.type === "FPO" && seller.userId)
-      .map(({ id: fpoId, name, location, rating, reviews, reliability, completedOrders, image }) => ({
-        fpoId,
-        name,
-        location,
-        rating,
-        reviews,
-        reliability,
-        completedOrders,
-        image,
-      }));
+      .map(
+        ({
+          id: fpoId,
+          name,
+          location,
+          rating,
+          reviews,
+          reliability,
+          completedOrders,
+          image,
+        }) => ({
+          fpoId,
+          name,
+          location,
+          rating,
+          reviews,
+          reliability,
+          completedOrders,
+          image,
+        }),
+      );
     ok(res, fpos);
   }),
 );
@@ -1877,11 +2349,19 @@ router.get(
   asyncHandler(async (req, res) => {
     const requests = await store.list("fpoMembershipRequests");
     if (req.user.role === "farmer")
-      return ok(res, requests.filter((request) => request.farmerId === req.user.sub));
+      return ok(
+        res,
+        requests.filter((request) => request.farmerId === req.user.sub),
+      );
     const managedFpo = (await store.list("sellers")).find(
       (seller) => seller.type === "FPO" && seller.userId === req.user.sub,
     );
-    ok(res, managedFpo ? requests.filter((request) => request.fpoId === managedFpo.id) : []);
+    ok(
+      res,
+      managedFpo
+        ? requests.filter((request) => request.fpoId === managedFpo.id)
+        : [],
+    );
   }),
 );
 router.post(
@@ -1892,15 +2372,28 @@ router.post(
   asyncHandler(async (req, res) => {
     const farmer = await store.get("users", req.user.sub);
     const fpo = (await store.list("sellers")).find(
-      (seller) => seller.id === req.body.fpoId && seller.type === "FPO" && seller.userId,
+      (seller) =>
+        seller.id === req.body.fpoId && seller.type === "FPO" && seller.userId,
     );
-    if (!fpo) throw new HttpError(404, "This FPO is not available for membership requests");
+    if (!fpo)
+      throw new HttpError(
+        404,
+        "This FPO is not available for membership requests",
+      );
     const requests = await store.list("fpoMembershipRequests");
     const existing = requests.find(
-      (request) => request.farmerId === req.user.sub && request.fpoId === fpo.id && ["PENDING", "APPROVED"].includes(request.status),
+      (request) =>
+        request.farmerId === req.user.sub &&
+        request.fpoId === fpo.id &&
+        ["PENDING", "APPROVED"].includes(request.status),
     );
     if (existing)
-      throw new HttpError(409, existing.status === "APPROVED" ? "You are already a member of this FPO" : "A membership request is already pending");
+      throw new HttpError(
+        409,
+        existing.status === "APPROVED"
+          ? "You are already a member of this FPO"
+          : "A membership request is already pending",
+      );
     const request = await store.create(
       "fpoMembershipRequests",
       {
@@ -1908,7 +2401,8 @@ router.post(
         fpoName: fpo.name,
         farmerId: req.user.sub,
         farmerName: farmer?.name || req.user.name,
-        farmName: farmer?.organization || `${farmer?.name || req.user.name}'s farm`,
+        farmName:
+          farmer?.organization || `${farmer?.name || req.user.name}'s farm`,
         location: farmer?.location || "Not provided",
         message: req.body.message,
         status: "PENDING",
@@ -1916,23 +2410,35 @@ router.post(
       "membership",
     );
     await Promise.all([
-      store.create("notifications", {
-        userId: fpo.userId,
-        title: "New FPO membership request",
-        message: `${request.farmerName} requested to join ${fpo.name}.`,
-        type: "FPO_MEMBERSHIP_REQUEST",
-        entityId: request._id,
-        read: false,
-      }, "note"),
-      store.create("auditLogs", {
-        actorId: req.user.sub,
-        action: "FPO_MEMBERSHIP_REQUESTED",
-        entityType: "FPOMembershipRequest",
-        entityId: request._id,
-        metadata: { fpoId: fpo.id },
-      }, "audit"),
+      store.create(
+        "notifications",
+        {
+          userId: fpo.userId,
+          title: "New FPO membership request",
+          message: `${request.farmerName} requested to join ${fpo.name}.`,
+          type: "FPO_MEMBERSHIP_REQUEST",
+          entityId: request._id,
+          read: false,
+        },
+        "note",
+      ),
+      store.create(
+        "auditLogs",
+        {
+          actorId: req.user.sub,
+          action: "FPO_MEMBERSHIP_REQUESTED",
+          entityType: "FPOMembershipRequest",
+          entityId: request._id,
+          metadata: { fpoId: fpo.id },
+        },
+        "audit",
+      ),
     ]);
-    emit(req, "notification:new", { userId: fpo.userId, type: "FPO_MEMBERSHIP_REQUEST", request });
+    emit(req, "notification:new", {
+      userId: fpo.userId,
+      type: "FPO_MEMBERSHIP_REQUEST",
+      request,
+    });
     ok(res, request);
   }),
 );
@@ -1942,60 +2448,95 @@ router.patch(
   allowRoles("fpo_manager"),
   validate(membershipReviewSchema),
   asyncHandler(async (req, res) => {
-    const membershipRequest = await store.get("fpoMembershipRequests", req.params.id);
-    if (!membershipRequest) throw new HttpError(404, "Membership request not found");
+    const membershipRequest = await store.get(
+      "fpoMembershipRequests",
+      req.params.id,
+    );
+    if (!membershipRequest)
+      throw new HttpError(404, "Membership request not found");
     const managedFpo = (await store.list("sellers")).find(
       (seller) => seller.type === "FPO" && seller.userId === req.user.sub,
     );
     if (!managedFpo || membershipRequest.fpoId !== managedFpo.id)
       throw new HttpError(403, "You can review requests only for your FPO");
     if (membershipRequest.status !== "PENDING")
-      throw new HttpError(409, "This membership request has already been reviewed");
+      throw new HttpError(
+        409,
+        "This membership request has already been reviewed",
+      );
     const status = req.body.action === "APPROVE" ? "APPROVED" : "REJECTED";
-    const updated = await store.update("fpoMembershipRequests", membershipRequest._id, {
-      status,
-      managerNote: req.body.note,
-      reviewedBy: req.user.sub,
-      reviewedAt: new Date().toISOString(),
-    });
+    const updated = await store.update(
+      "fpoMembershipRequests",
+      membershipRequest._id,
+      {
+        status,
+        managerNote: req.body.note,
+        reviewedBy: req.user.sub,
+        reviewedAt: new Date().toISOString(),
+      },
+    );
     if (status === "APPROVED") {
       const existingMember = (await store.list("members")).find(
-        (member) => member.fpoId === managedFpo.id && member.userId === membershipRequest.farmerId,
+        (member) =>
+          member.fpoId === managedFpo.id &&
+          member.userId === membershipRequest.farmerId,
       );
       if (!existingMember)
-        await store.create("members", {
-          fpoId: managedFpo.id,
-          userId: membershipRequest.farmerId,
-          farmer: membershipRequest.farmerName,
-          farmName: membershipRequest.farmName,
-          location: membershipRequest.location,
-          lotId: "No contribution yet",
-          product: "No contribution yet",
-          grade: "—",
-          availableQuantity: 0,
-          selectedQuantity: 0,
-          status: "ACTIVE",
-          joinedAt: new Date().toISOString(),
-        }, "member");
+        await store.create(
+          "members",
+          {
+            fpoId: managedFpo.id,
+            userId: membershipRequest.farmerId,
+            farmer: membershipRequest.farmerName,
+            farmName: membershipRequest.farmName,
+            location: membershipRequest.location,
+            lotId: "No contribution yet",
+            product: "No contribution yet",
+            grade: "—",
+            availableQuantity: 0,
+            selectedQuantity: 0,
+            status: "ACTIVE",
+            joinedAt: new Date().toISOString(),
+          },
+          "member",
+        );
     }
     await Promise.all([
-      store.create("notifications", {
-        userId: membershipRequest.farmerId,
-        title: `FPO membership ${status.toLowerCase()}`,
-        message: status === "APPROVED" ? `${managedFpo.name} approved your membership request.` : `${managedFpo.name} did not approve your membership request.`,
-        type: "FPO_MEMBERSHIP_UPDATED",
-        entityId: membershipRequest._id,
-        read: false,
-      }, "note"),
-      store.create("auditLogs", {
-        actorId: req.user.sub,
-        action: `FPO_MEMBERSHIP_${status}`,
-        entityType: "FPOMembershipRequest",
-        entityId: membershipRequest._id,
-        metadata: { farmerId: membershipRequest.farmerId, fpoId: managedFpo.id },
-      }, "audit"),
+      store.create(
+        "notifications",
+        {
+          userId: membershipRequest.farmerId,
+          title: `FPO membership ${status.toLowerCase()}`,
+          message:
+            status === "APPROVED"
+              ? `${managedFpo.name} approved your membership request.`
+              : `${managedFpo.name} did not approve your membership request.`,
+          type: "FPO_MEMBERSHIP_UPDATED",
+          entityId: membershipRequest._id,
+          read: false,
+        },
+        "note",
+      ),
+      store.create(
+        "auditLogs",
+        {
+          actorId: req.user.sub,
+          action: `FPO_MEMBERSHIP_${status}`,
+          entityType: "FPOMembershipRequest",
+          entityId: membershipRequest._id,
+          metadata: {
+            farmerId: membershipRequest.farmerId,
+            fpoId: managedFpo.id,
+          },
+        },
+        "audit",
+      ),
     ]);
-    emit(req, "notification:new", { userId: membershipRequest.farmerId, type: "FPO_MEMBERSHIP_UPDATED", request: updated });
+    emit(req, "notification:new", {
+      userId: membershipRequest.farmerId,
+      type: "FPO_MEMBERSHIP_UPDATED",
+      request: updated,
+    });
     ok(res, updated);
   }),
 );
@@ -2060,465 +2601,17 @@ router.get(
     const managedFpo = (await store.list("sellers")).find(
       (seller) => seller.type === "FPO" && seller.userId === req.user.sub,
     );
-    ok(res, managedFpo ? await store.list("settlements", { fpoId: managedFpo.id }) : []);
+    ok(
+      res,
+      managedFpo
+        ? await store.list("settlements", { fpoId: managedFpo.id })
+        : [],
+    );
   }),
 );
 
-router.get(
-  "/shipments",
-  requireAuth,
-  allowRoles("driver", "logistics_partner", "logistics", "admin"),
-  asyncHandler(async (req, res) => {
-    const shipments = await store.list("shipments", req.user.role === "driver" ? { driverUserId: req.user.sub } : {});
-    const optimized = await Promise.all(shipments.map((shipment) => (
-      shipment.status !== "DELIVERED" && shipment.routeOptimization?.version !== 2
-        ? optimizeStoredShipment(shipment, "AUTOMATIC_ACCESS")
-        : shipment
-    )));
-    ok(res, optimized);
-  }),
-);
-router.get(
-  "/shipments/:id",
-  requireAuth,
-  allowRoles("driver", "logistics_partner", "logistics", "admin"),
-  asyncHandler(async (req, res) => {
-    const shipment = await store.get("shipments", req.params.id);
-    if (!shipment) throw new HttpError(404, "Shipment not found");
-    assertShipmentAccess(req, shipment);
-    const optimized = shipment.status !== "DELIVERED" && shipment.routeOptimization?.version !== 2
-      ? await optimizeStoredShipment(shipment, "AUTOMATIC_ACCESS")
-      : shipment;
-    ok(res, optimized);
-  }),
-);
-router.get(
-  "/shipments/:id/load-opportunities",
-  requireAuth,
-  allowRoles("driver", "logistics_partner", "logistics"),
-  asyncHandler(async (req, res) => {
-    const shipment = await store.get("shipments", req.params.id);
-    if (!shipment) throw new HttpError(404, "Shipment not found");
-    assertShipmentAccess(req, shipment);
-    const opportunities = findLoadOpportunities(shipment, await store.list("shipments"));
-    ok(res, {
-      shipmentId: shipment._id,
-      remainingCapacity: Math.max(0, Number(shipment.capacity || 0) - Number(shipment.load || 0)),
-      opportunities,
-      rules: "In-transit only · remaining capacity · cold-chain compatible · maximum 50% route detour",
-    });
-  }),
-);
-router.post(
-  "/shipments/:id/load-offers",
-  requireAuth,
-  allowRoles("logistics_partner", "logistics"),
-  validate(loadOfferSchema),
-  asyncHandler(async (req, res) => {
-    const [shipment, candidate] = await Promise.all([
-      store.get("shipments", req.params.id),
-      store.get("shipments", req.body.candidateShipmentId),
-    ]);
-    if (!shipment) throw new HttpError(404, "Active shipment not found");
-    if (!candidate) throw new HttpError(404, "Additional load not found");
-    if ((shipment.loadOffers || []).some((offer) => offer.candidateShipmentId === candidate._id && offer.status === "PENDING_DRIVER"))
-      throw new HttpError(409, "This load is already awaiting a response");
-    const opportunity = findLoadOpportunities(shipment, [candidate])[0];
-    if (!opportunity) {
-      const evaluation = evaluateLoadOpportunity(shipment, candidate);
-      throw new HttpError(409, evaluation.reasons.join(". ") || "This load is not compatible with the active trip");
-    }
-    const offer = {
-      id: id("load-offer"),
-      candidateShipmentId: candidate._id,
-      orderIds: candidate.orderIds || [],
-      addedLoad: opportunity.addedLoad,
-      pickup: opportunity.pickup,
-      delivery: opportunity.delivery,
-      detourKm: opportunity.detourKm,
-      detourPercent: opportunity.detourPercent,
-      utilizationAfter: opportunity.utilizationAfter,
-      spareCapacityAfter: opportunity.spareCapacityAfter,
-      optimizedDistance: opportunity.optimizedDistance,
-      optimizedDuration: opportunity.optimizedDuration,
-      status: "PENDING_DRIVER",
-      proposedBy: req.user.sub,
-      proposedAt: new Date().toISOString(),
-    };
-    const updated = await store.update("shipments", shipment._id, {
-      loadOffers: [...(shipment.loadOffers || []), offer],
-      timeline: [...(shipment.timeline || []), `${candidate.load}kg in-transit load offered for driver review`],
-    });
-    await store.update("shipments", candidate._id, {
-      status: "LOAD_OFFERED",
-      loadOfferTo: shipment._id,
-      loadOfferId: offer.id,
-    });
-    await Promise.all([
-      shipment.driverUserId ? store.create("notifications", {
-        userId: shipment.driverUserId,
-        title: "Compatible load available on your route",
-        message: `${offer.addedLoad}kg · ${offer.detourKm}km estimated detour · review before accepting.`,
-        type: "IN_TRANSIT_LOAD_OFFER",
-        entityId: shipment._id,
-        read: false,
-      }, "note") : Promise.resolve(),
-      store.create("auditLogs", {
-        actorId: req.user.sub,
-        action: "IN_TRANSIT_LOAD_OFFERED",
-        entityType: "Shipment",
-        entityId: shipment._id,
-        metadata: { offerId: offer.id, candidateShipmentId: candidate._id, addedLoad: offer.addedLoad, detourKm: offer.detourKm },
-      }, "audit"),
-    ]);
-    emit(req, "shipment:statusChanged", updated);
-    ok(res, { shipment: updated, offer });
-  }),
-);
-router.post(
-  "/shipments/:id/load-offers/:offerId/respond",
-  requireAuth,
-  allowRoles("driver", "logistics_partner", "logistics"),
-  validate(loadOfferResponseSchema),
-  asyncHandler(async (req, res) => {
-    const result = await store.transaction(async (session) => {
-      const shipment = await store.get("shipments", req.params.id, session);
-      if (!shipment) throw new HttpError(404, "Active shipment not found");
-      assertShipmentAccess(req, shipment, "Drivers can respond only to loads offered to their assigned trip");
-      const offer = (shipment.loadOffers || []).find((candidateOffer) => candidateOffer.id === req.params.offerId);
-      if (!offer) throw new HttpError(404, "Load offer not found");
-      if (offer.status !== "PENDING_DRIVER") throw new HttpError(409, "This load offer has already been answered");
-      const candidate = await store.get("shipments", offer.candidateShipmentId, session);
-      if (!candidate) throw new HttpError(404, "Additional load is no longer available");
-      if (req.body.action === "DECLINE") {
-        const respondedAt = new Date().toISOString();
-        const loadOffers = shipment.loadOffers.map((candidateOffer) => candidateOffer.id === offer.id ? {
-          ...candidateOffer,
-          status: "DECLINED",
-          responseNote: req.body.note,
-          respondedAt,
-          respondedBy: req.user.sub,
-          respondedByRole: req.user.role,
-        } : candidateOffer);
-        const updated = await store.update("shipments", shipment._id, {
-          loadOffers,
-          timeline: [...(shipment.timeline || []), `${candidate.load}kg in-transit load declined`],
-        }, session);
-        const availableCandidate = await store.update("shipments", candidate._id, { status: "PLANNED", loadOfferTo: null, loadOfferId: null }, session);
-        return { shipment: updated, candidate: availableCandidate, offer: loadOffers.find((item) => item.id === offer.id) };
-      }
-      const merged = mergeAcceptedLoad(shipment, candidate, offer.id, req.user);
-      if (!merged.shipment)
-        throw new HttpError(409, merged.evaluation.reasons.join(". ") || "The load no longer fits this trip");
-      const changes = { ...merged.shipment };
-      delete changes._id;
-      delete changes.createdAt;
-      delete changes.updatedAt;
-      const updated = await store.update("shipments", shipment._id, changes, session);
-      const mergedCandidate = await store.update("shipments", candidate._id, {
-        status: "MERGED_IN_TRANSIT",
-        dispatchRequired: false,
-        mergedIntoShipmentId: shipment._id,
-        mergedAt: new Date().toISOString(),
-        loadOfferTo: shipment._id,
-      }, session);
-      return { shipment: updated, candidate: mergedCandidate, offer: updated.loadOffers.find((item) => item.id === offer.id), evaluation: merged.evaluation };
-    });
-    await store.create("auditLogs", {
-      actorId: req.user.sub,
-      action: req.body.action === "ACCEPT" ? "IN_TRANSIT_LOAD_ACCEPTED" : "IN_TRANSIT_LOAD_DECLINED",
-      entityType: "Shipment",
-      entityId: req.params.id,
-      metadata: { offerId: req.params.offerId, candidateShipmentId: result.candidate._id, newLoad: result.shipment.load },
-    }, "audit");
-    const dispatchers = (await store.list("users")).filter((user) =>
-      ["logistics_partner", "logistics"].includes(user.role) && accountStatusOf(user) === "ACTIVE" && user._id !== req.user.sub,
-    );
-    const responseLabel = req.body.action === "ACCEPT" ? "accepted" : "declined";
-    await Promise.all(dispatchers.map((dispatcher) => store.create("notifications", {
-      userId: dispatcher._id,
-      title: `In-transit load ${responseLabel}`,
-      message: `${result.candidate.load}kg load for ${result.shipment._id} was ${responseLabel}.`,
-      type: "IN_TRANSIT_LOAD_RESPONSE",
-      entityId: result.shipment._id,
-      read: false,
-    }, "note")));
-    emit(req, "shipment:statusChanged", result.shipment);
-    ok(res, result);
-  }),
-);
-router.post(
-  "/shipments/:id/optimize",
-  requireAuth,
-  allowRoles("driver", "logistics_partner", "logistics"),
-  asyncHandler(async (req, res) => {
-    const shipment = await store.get("shipments", req.params.id);
-    if (!shipment) throw new HttpError(404, "Shipment not found");
-    assertShipmentAccess(req, shipment);
-    const updated = await optimizeStoredShipment(
-      shipment,
-      req.user.role === "driver" ? "DRIVER_RECALCULATION" : "FLEET_RECALCULATION",
-    );
-    await store.create(
-      "auditLogs",
-      {
-        actorId: req.user.sub,
-        action: "SHIPMENT_ROUTE_OPTIMIZED",
-        entityType: "Shipment",
-        entityId: shipment._id,
-        metadata: { distance: updated.distance, trigger: updated.routeOptimization?.trigger },
-      },
-      "audit",
-    );
-    ok(res, updated);
-  }),
-);
-router.post(
-  "/shipments/:id/dispatch",
-  requireAuth,
-  allowRoles("logistics_partner", "logistics"),
-  validate(shipmentDispatchSchema),
-  asyncHandler(async (req, res) => {
-    const [shipment, vehicle, users] = await Promise.all([
-      store.get("shipments", req.params.id),
-      store.get("vehicles", req.body.vehicleId),
-      store.list("users"),
-    ]);
-    if (!shipment) throw new HttpError(404, "Shipment not found");
-    if (!vehicle) throw new HttpError(404, "Vehicle not found");
-    if (!["AVAILABLE", "IDLE"].includes(vehicle.status) && vehicle.shipmentId !== shipment._id)
-      throw new HttpError(409, "This vehicle is already assigned or unavailable");
-    if (Number(vehicle.capacity) < Number(shipment.load))
-      throw new HttpError(409, `Vehicle capacity is ${vehicle.capacity}kg, below this ${shipment.load}kg load`);
-    if (shipment.coldChainRequired && !vehicle.coldChain)
-      throw new HttpError(409, "Choose a cold-chain vehicle for this shipment");
-    const activeDrivers = users.filter((user) => user.role === "driver" && accountStatusOf(user) === "ACTIVE");
-    const driver = activeDrivers.find((user) => user._id === vehicle.driverUserId && (!user.currentShipmentId || user.currentShipmentId === shipment._id))
-      || activeDrivers.find((user) => !user.currentShipmentId || user.currentShipmentId === shipment._id);
-    if (!driver) throw new HttpError(409, "No active verified driver is available for this vehicle");
-    if (shipment.vehicleId && shipment.vehicleId !== vehicle._id)
-      await store.update("vehicles", shipment.vehicleId, { status: "AVAILABLE", shipmentId: null });
-    await Promise.all([
-      store.update("vehicles", vehicle._id, { status: "ASSIGNED", shipmentId: shipment._id }),
-      store.update("users", driver._id, { currentShipmentId: shipment._id }),
-    ]);
-    const assigned = await store.update("shipments", shipment._id, {
-      vehicleId: vehicle._id,
-      vehicle: `${vehicle.registration} · ${vehicle.type}`,
-      driverUserId: driver._id,
-      driver: driver.name,
-      phone: driver.phone ? `•••• ${String(driver.phone).slice(-4)}` : "Protected",
-      capacity: vehicle.capacity,
-      coldChain: Boolean(vehicle.coldChain),
-      status: "READY_FOR_PICKUP",
-      dispatchRequired: false,
-      dispatchedAt: new Date().toISOString(),
-      dispatchedBy: req.user.sub,
-      timeline: [...(shipment.timeline || []), "Vehicle and driver auto-dispatched"],
-    });
-    const updated = await optimizeStoredShipment(assigned, "FLEET_DISPATCH");
-    await Promise.all([
-      store.create("notifications", {
-        userId: driver._id,
-        title: "Trip dispatched to you",
-        message: `${updated.load}kg · ${updated.stops.length} stops · next: ${updated.nextStop?.label}.`,
-        type: "SHIPMENT_ASSIGNED",
-        entityId: updated._id,
-        read: false,
-      }, "note"),
-      store.create("auditLogs", {
-        actorId: req.user.sub,
-        action: "SHIPMENT_AUTO_DISPATCHED",
-        entityType: "Shipment",
-        entityId: updated._id,
-        metadata: { vehicleId: vehicle._id, driverId: driver._id, distance: updated.distance },
-      }, "audit"),
-    ]);
-    emit(req, "shipment:statusChanged", updated);
-    ok(res, updated);
-  }),
-);
-router.post(
-  "/shipments/:id/start",
-  requireAuth,
-  allowRoles("driver", "logistics_partner", "logistics"),
-  asyncHandler(async (req, res) => {
-    const shipment = await store.get("shipments", req.params.id);
-    if (!shipment) throw new HttpError(404, "Shipment not found");
-    assertShipmentAccess(req, shipment, "Drivers can start only their assigned shipments");
-    if (!shipment.driverUserId || !shipment.vehicleId && shipment.dispatchRequired)
-      throw new HttpError(409, "A verified driver and vehicle must be assigned before starting");
-    if (shipment.status === "DELIVERED") throw new HttpError(409, "This shipment is already delivered");
-    const prepared = shipment.routeOptimization?.version === 2
-      ? shipment
-      : await optimizeStoredShipment(shipment, "TRIP_START");
-    const updated = await store.update("shipments", shipment._id, {
-      status: "IN_TRANSIT",
-      startedAt: prepared.startedAt || new Date().toISOString(),
-      timeline: [...(prepared.timeline || []), "Driver started optimized trip"],
-    });
-    await store.create("auditLogs", {
-      actorId: req.user.sub,
-      action: "SHIPMENT_TRIP_STARTED",
-      entityType: "Shipment",
-      entityId: shipment._id,
-      metadata: { nextStop: updated.nextStop?.label },
-    }, "audit");
-    emit(req, "shipment:statusChanged", updated);
-    ok(res, updated);
-  }),
-);
-router.post(
-  "/shipments/:id/stops/:stop/complete",
-  requireAuth,
-  allowRoles("driver", "logistics_partner", "logistics"),
-  validate(shipmentStopSchema),
-  asyncHandler(async (req, res) => {
-    const shipment = await store.get("shipments", req.params.id);
-    if (!shipment) throw new HttpError(404, "Shipment not found");
-    assertShipmentAccess(req, shipment, "Drivers can update only their assigned shipments");
-    const prepared = shipment.routeOptimization?.version === 2
-      ? shipment
-      : await optimizeStoredShipment(shipment, "STOP_WORKFLOW_OPENED");
-    const targetIndex = prepared.stops.findIndex((stop) => (
-      stop.id === req.params.stop || String(stop.sequence) === req.params.stop
-    ));
-    if (targetIndex < 0) throw new HttpError(404, "Route stop not found");
-    const target = prepared.stops[targetIndex];
-    if (target.status === "COMPLETED") throw new HttpError(409, "This route stop is already complete");
-    if (target.status !== "NEXT") throw new HttpError(409, `Complete ${prepared.nextStop?.label || "the next stop"} first`);
-    const stops = prepared.stops.map((stop, index) => index === targetIndex ? {
-      ...stop,
-      status: "COMPLETED",
-      completedAt: new Date().toISOString(),
-      completedBy: req.user.sub,
-      completedQuantity: req.body.quantity ?? stop.quantity,
-      completionNotes: req.body.notes,
-    } : stop);
-    const allComplete = stops.every((stop) => stop.status === "COMPLETED");
-    const advanced = await store.update("shipments", shipment._id, {
-      stops,
-      status: allComplete ? "DELIVERED" : "IN_TRANSIT",
-      deliveredAt: allComplete ? new Date().toISOString() : undefined,
-      timeline: [...(prepared.timeline || []), `${target.type.toLowerCase()} completed · ${target.label}`],
-    });
-    const updated = allComplete ? advanced : await optimizeStoredShipment(advanced, "STOP_COMPLETED");
-    if (allComplete) {
-      if (updated.vehicleId) await store.update("vehicles", updated.vehicleId, { status: "AVAILABLE", shipmentId: null });
-      if (updated.driverUserId) await store.update("users", updated.driverUserId, { currentShipmentId: null });
-    }
-    await store.create("auditLogs", {
-      actorId: req.user.sub,
-      action: "SHIPMENT_STOP_COMPLETED",
-      entityType: "Shipment",
-      entityId: shipment._id,
-      metadata: { stopType: target.type, stopLabel: target.label, allComplete },
-    }, "audit");
-    emit(req, "shipment:statusChanged", updated);
-    ok(res, updated);
-  }),
-);
-router.post(
-  "/shipments/:id/issues",
-  requireAuth,
-  allowRoles("driver", "logistics_partner", "logistics"),
-  validate(shipmentIssueSchema),
-  asyncHandler(async (req, res) => {
-    const shipment = await store.get("shipments", req.params.id);
-    if (!shipment) throw new HttpError(404, "Shipment not found");
-    assertShipmentAccess(req, shipment, "Drivers can report issues only for their assigned shipments");
-    const issue = { id: id("issue"), ...req.body, reportedBy: req.user.sub, reportedAt: new Date().toISOString(), status: "OPEN" };
-    const updated = await store.update("shipments", shipment._id, {
-      issues: [...(shipment.issues || []), issue],
-      status: "DELAYED",
-      timeline: [...(shipment.timeline || []), `${req.body.severity.toLowerCase()} ${req.body.type.toLowerCase()} issue reported`],
-    });
-    const dispatchers = (await store.list("users")).filter((user) =>
-      ["logistics_partner", "logistics"].includes(user.role) && accountStatusOf(user) === "ACTIVE" && user._id !== req.user.sub,
-    );
-    await Promise.all([
-      ...dispatchers.map((dispatcher) => store.create("notifications", {
-        userId: dispatcher._id,
-        title: `${req.body.severity} shipment issue`,
-        message: `${shipment._id}: ${req.body.message}`,
-        type: "SHIPMENT_ISSUE",
-        entityId: shipment._id,
-        read: false,
-      }, "note")),
-      store.create("auditLogs", {
-        actorId: req.user.sub,
-        action: "SHIPMENT_ISSUE_REPORTED",
-        entityType: "Shipment",
-        entityId: shipment._id,
-        metadata: { issueId: issue.id, type: issue.type, severity: issue.severity },
-      }, "audit"),
-    ]);
-    emit(req, "shipment:statusChanged", updated);
-    ok(res, updated);
-  }),
-);
-router.post(
-  "/shipments/:id/proof-of-pickup",
-  requireAuth,
-  allowRoles("driver", "logistics_partner", "logistics"),
-  asyncHandler(async (req, res) => {
-    const shipment = await store.get("shipments", req.params.id);
-    if (!shipment) throw new HttpError(404, "Shipment not found");
-    assertShipmentAccess(req, shipment, "Drivers can update only their assigned shipments");
-    const completedAt = new Date().toISOString();
-    const stops = shipment.stops.map((stop) => stop.type === "PICKUP" ? { ...stop, status: "COMPLETED", completedAt, completedBy: req.user.sub } : stop);
-    const updated = await store.update("shipments", req.params.id, {
-      status: "PICKED_UP",
-      stops,
-      proofOfPickup: {
-        timestamp: new Date().toISOString(),
-        receiverName: req.body.receiverName,
-        quantity: req.body.quantity,
-        notes: req.body.notes,
-      },
-    });
-    const optimized = await optimizeStoredShipment(updated, "PROOF_OF_PICKUP");
-    emit(req, "shipment:statusChanged", optimized);
-    ok(res, optimized);
-  }),
-);
-router.post(
-  "/shipments/:id/proof-of-delivery",
-  requireAuth,
-  allowRoles("driver", "logistics_partner", "logistics"),
-  asyncHandler(async (req, res) => {
-    const shipment = await store.get("shipments", req.params.id);
-    if (!shipment) throw new HttpError(404, "Shipment not found");
-    assertShipmentAccess(req, shipment, "Drivers can update only their assigned shipments");
-    const completedAt = new Date().toISOString();
-    const updated = await store.update("shipments", req.params.id, {
-      status: "DELIVERED",
-      stops: shipment.stops.map((stop) => stop.type === "DELIVERY" ? { ...stop, status: "COMPLETED", completedAt, completedBy: req.user.sub } : stop),
-      deliveredAt: completedAt,
-      proofOfDelivery: {
-        timestamp: new Date().toISOString(),
-        receiverName: req.body.receiverName,
-        acceptedQuantity: req.body.acceptedQuantity,
-        rejectedQuantity: req.body.rejectedQuantity || 0,
-        notes: req.body.notes,
-      },
-    });
-    if (updated.vehicleId) await store.update("vehicles", updated.vehicleId, { status: "AVAILABLE", shipmentId: null });
-    if (updated.driverUserId) await store.update("users", updated.driverUserId, { currentShipmentId: null });
-    emit(req, "shipment:statusChanged", updated);
-    ok(res, updated);
-  }),
-);
-router.get(
-  "/hubs",
-  asyncHandler(async (_req, res) => ok(res, await store.list("hubs"))),
-);
-router.get(
-  "/vehicles",
-  requireAuth,
-  allowRoles("driver", "logistics_partner", "logistics", "admin"),
-  asyncHandler(async (req, res) => ok(res, await store.list("vehicles", req.user.role === "driver" ? { driverUserId: req.user.sub } : {}))),
-);
+registerLogisticsRoutes(router);
+
 router.get(
   "/notifications",
   requireAuth,
@@ -2608,7 +2701,10 @@ router.get(
     const requestedStatus = String(req.query.status || "").toUpperCase();
     const requestedRole = String(req.query.role || "").toLowerCase();
     const queue = profiles
-      .filter((profile) => !requestedStatus || profile.overallStatus === requestedStatus)
+      .filter(
+        (profile) =>
+          !requestedStatus || profile.overallStatus === requestedStatus,
+      )
       .filter((profile) => !requestedRole || profile.role === requestedRole)
       .map((profile) => {
         const applicant = users.find((user) => user._id === profile.userId);
@@ -2620,7 +2716,11 @@ router.get(
             .map(cleanVerificationDocument),
         };
       })
-      .sort((a, b) => new Date(b.submittedAt || b.updatedAt) - new Date(a.submittedAt || a.updatedAt));
+      .sort(
+        (a, b) =>
+          new Date(b.submittedAt || b.updatedAt) -
+          new Date(a.submittedAt || a.updatedAt),
+      );
     ok(res, queue);
   }),
 );
@@ -2630,7 +2730,8 @@ router.get(
   allowRoles("admin"),
   asyncHandler(async (req, res) => {
     const profile = await store.get("verificationProfiles", req.params.id);
-    if (!profile) throw new HttpError(404, "Verification application not found");
+    if (!profile)
+      throw new HttpError(404, "Verification application not found");
     const [applicant, documents, reviews] = await Promise.all([
       store.get("users", profile.userId),
       store.list("verificationDocuments", { ownerId: profile.userId }),
@@ -2651,15 +2752,41 @@ router.patch(
   validate(verificationReviewSchema),
   asyncHandler(async (req, res) => {
     const profile = await store.get("verificationProfiles", req.params.id);
-    if (!profile) throw new HttpError(404, "Verification application not found");
+    if (!profile)
+      throw new HttpError(404, "Verification application not found");
     const applicant = await store.get("users", profile.userId);
     if (!applicant) throw new HttpError(404, "Applicant account not found");
     const transitions = {
-      APPROVE: { accountStatus: "ACTIVE", verificationStatus: "APPROVED", verified: true, overallStatus: "APPROVED" },
-      REQUEST_CHANGES: { accountStatus: "CHANGES_REQUESTED", verificationStatus: "CHANGES_REQUESTED", verified: false, overallStatus: "CHANGES_REQUESTED" },
-      REJECT: { accountStatus: "REJECTED", verificationStatus: "REJECTED", verified: false, overallStatus: "REJECTED" },
-      SUSPEND: { accountStatus: "SUSPENDED", verificationStatus: "SUSPENDED", verified: false, overallStatus: "SUSPENDED" },
-      REACTIVATE: { accountStatus: "ACTIVE", verificationStatus: "APPROVED", verified: true, overallStatus: "APPROVED" },
+      APPROVE: {
+        accountStatus: "ACTIVE",
+        verificationStatus: "APPROVED",
+        verified: true,
+        overallStatus: "APPROVED",
+      },
+      REQUEST_CHANGES: {
+        accountStatus: "CHANGES_REQUESTED",
+        verificationStatus: "CHANGES_REQUESTED",
+        verified: false,
+        overallStatus: "CHANGES_REQUESTED",
+      },
+      REJECT: {
+        accountStatus: "REJECTED",
+        verificationStatus: "REJECTED",
+        verified: false,
+        overallStatus: "REJECTED",
+      },
+      SUSPEND: {
+        accountStatus: "SUSPENDED",
+        verificationStatus: "SUSPENDED",
+        verified: false,
+        overallStatus: "SUSPENDED",
+      },
+      REACTIVATE: {
+        accountStatus: "ACTIVE",
+        verificationStatus: "APPROVED",
+        verified: true,
+        overallStatus: "APPROVED",
+      },
     };
     const transition = transitions[req.body.action];
     const now = new Date().toISOString();
@@ -2668,44 +2795,69 @@ router.patch(
       verificationStatus: transition.verificationStatus,
       verified: transition.verified,
     });
-    const updatedProfile = await store.update("verificationProfiles", profile._id, {
-      overallStatus: transition.overallStatus,
-      approvedAt: transition.overallStatus === "APPROVED" ? now : profile.approvedAt,
-      approvedBy: transition.overallStatus === "APPROVED" ? req.user.sub : profile.approvedBy,
-      rejectionReasonCode: req.body.reasonCode || "",
-      adminNote: req.body.note || "",
-    });
-    const review = await store.create("verificationReviews", {
-      profileId: profile._id,
-      applicantId: applicant._id,
-      reviewerId: req.user.sub,
-      action: req.body.action,
-      reasonCode: req.body.reasonCode,
-      note: req.body.note,
-      previousStatus: profile.overallStatus,
-      nextStatus: transition.overallStatus,
-    }, "review");
-    await store.create("auditLogs", {
-      actorId: req.user.sub,
-      action: `VERIFICATION_${req.body.action}`,
-      entityType: "VerificationProfile",
-      entityId: profile._id,
-      metadata: {
+    const updatedProfile = await store.update(
+      "verificationProfiles",
+      profile._id,
+      {
+        overallStatus: transition.overallStatus,
+        approvedAt:
+          transition.overallStatus === "APPROVED" ? now : profile.approvedAt,
+        approvedBy:
+          transition.overallStatus === "APPROVED"
+            ? req.user.sub
+            : profile.approvedBy,
+        rejectionReasonCode: req.body.reasonCode || "",
+        adminNote: req.body.note || "",
+      },
+    );
+    const review = await store.create(
+      "verificationReviews",
+      {
+        profileId: profile._id,
         applicantId: applicant._id,
+        reviewerId: req.user.sub,
+        action: req.body.action,
+        reasonCode: req.body.reasonCode,
+        note: req.body.note,
         previousStatus: profile.overallStatus,
         nextStatus: transition.overallStatus,
-        reasonCode: req.body.reasonCode,
       },
-    }, "audit");
-    await store.create("notifications", {
+      "review",
+    );
+    await store.create(
+      "auditLogs",
+      {
+        actorId: req.user.sub,
+        action: `VERIFICATION_${req.body.action}`,
+        entityType: "VerificationProfile",
+        entityId: profile._id,
+        metadata: {
+          applicantId: applicant._id,
+          previousStatus: profile.overallStatus,
+          nextStatus: transition.overallStatus,
+          reasonCode: req.body.reasonCode,
+        },
+      },
+      "audit",
+    );
+    await store.create(
+      "notifications",
+      {
+        userId: applicant._id,
+        title: "Verification status updated",
+        message:
+          req.body.note ||
+          `Your application is now ${transition.overallStatus.replaceAll("_", " ").toLowerCase()}.`,
+        type: "VERIFICATION",
+        entityId: profile._id,
+        read: false,
+      },
+      "notification",
+    );
+    emit(req, "verification:updated", {
       userId: applicant._id,
-      title: "Verification status updated",
-      message: req.body.note || `Your application is now ${transition.overallStatus.replaceAll("_", " ").toLowerCase()}.`,
-      type: "VERIFICATION",
-      entityId: profile._id,
-      read: false,
-    }, "notification");
-    emit(req, "verification:updated", { userId: applicant._id, status: transition.accountStatus });
+      status: transition.accountStatus,
+    });
     ok(res, { ...updatedProfile, applicant: cleanUser(updatedUser), review });
   }),
 );
@@ -2720,39 +2872,84 @@ router.get(
   requireAuth,
   allowRoles("farmer", "fpo_manager", "admin"),
   asyncHandler(async (req, res) => {
-    const [allOrders, allLots, allHarvests, allShipments, sellers, subFulfillments] = await Promise.all(
-      ["orders", "lots", "expectedHarvests", "shipments", "sellers", "subFulfillments"].map((key) => store.list(key)),
+    const [
+      allOrders,
+      allLots,
+      allHarvests,
+      allShipments,
+      sellers,
+      subFulfillments,
+    ] = await Promise.all(
+      [
+        "orders",
+        "lots",
+        "expectedHarvests",
+        "shipments",
+        "sellers",
+        "subFulfillments",
+      ].map((key) => store.list(key)),
     );
     const seller = sellerForUser(sellers, req.user.sub);
-    const sellerSuborders = req.user.role === "admin" || !seller
-      ? []
-      : subFulfillments.filter((suborder) => suborder.sellerId === seller.id);
-    const scopedOrderIds = req.user.role === "admin"
-      ? new Set(allOrders.map((order) => order._id))
-      : new Set([
-        ...allOrders.filter((order) => order.sellerId === seller?.id).map((order) => order._id),
-        ...sellerSuborders.map((suborder) => suborder.orderId),
-      ]);
+    const sellerSuborders =
+      req.user.role === "admin" || !seller
+        ? []
+        : subFulfillments.filter((suborder) => suborder.sellerId === seller.id);
+    const scopedOrderIds =
+      req.user.role === "admin"
+        ? new Set(allOrders.map((order) => order._id))
+        : new Set([
+            ...allOrders
+              .filter((order) => order.sellerId === seller?.id)
+              .map((order) => order._id),
+            ...sellerSuborders.map((suborder) => suborder.orderId),
+          ]);
     const orders = allOrders.filter((order) => scopedOrderIds.has(order._id));
-    const lots = req.user.role === "admin" ? allLots : allLots.filter((lot) => lot.sellerId === seller?.id);
-    const harvests = req.user.role === "admin" ? allHarvests : allHarvests.filter((harvest) => [seller?.id, req.user.sub].includes(harvest.sellerId));
-    const shipments = allShipments.filter((shipment) => shipmentBelongsToOrders(shipment, scopedOrderIds));
-    const revenue = req.user.role === "admin"
-      ? orders.reduce((total, order) => total + (order.total || 0), 0)
-      : sellerSuborders.length
-        ? sellerSuborders.reduce((total, suborder) => total + (suborder.subtotal || 0), 0)
-        : orders.reduce((total, order) => total + (order.total || 0), 0);
+    const lots =
+      req.user.role === "admin"
+        ? allLots
+        : allLots.filter((lot) => lot.sellerId === seller?.id);
+    const harvests =
+      req.user.role === "admin"
+        ? allHarvests
+        : allHarvests.filter((harvest) =>
+            [seller?.id, req.user.sub].includes(harvest.sellerId),
+          );
+    const shipments = allShipments.filter((shipment) =>
+      shipmentBelongsToOrders(shipment, scopedOrderIds),
+    );
+    const revenue =
+      req.user.role === "admin"
+        ? orders.reduce((total, order) => total + (order.total || 0), 0)
+        : sellerSuborders.length
+          ? sellerSuborders.reduce(
+              (total, suborder) => total + (suborder.subtotal || 0),
+              0,
+            )
+          : orders.reduce((total, order) => total + (order.total || 0), 0);
     const monthly = Array.from({ length: 6 }, (_, index) => {
       const month = new Date();
       month.setMonth(month.getMonth() - (5 - index), 1);
       const matching = orders.filter((order) => {
         const created = new Date(order.createdAt || 0);
-        return created.getFullYear() === month.getFullYear() && created.getMonth() === month.getMonth();
+        return (
+          created.getFullYear() === month.getFullYear() &&
+          created.getMonth() === month.getMonth()
+        );
       });
-      const orderRevenue = req.user.role !== "admin" && sellerSuborders.length
-        ? sellerSuborders.filter((suborder) => matching.some((order) => order._id === suborder.orderId)).reduce((total, suborder) => total + (suborder.subtotal || 0), 0)
-        : matching.reduce((total, order) => total + (order.total || 0), 0);
-      return { month: month.toLocaleString("en", { month: "short" }), revenue: orderRevenue, retail: matching.filter((order) => order.type !== "BULK").length, bulk: matching.filter((order) => order.type === "BULK").length };
+      const orderRevenue =
+        req.user.role !== "admin" && sellerSuborders.length
+          ? sellerSuborders
+              .filter((suborder) =>
+                matching.some((order) => order._id === suborder.orderId),
+              )
+              .reduce((total, suborder) => total + (suborder.subtotal || 0), 0)
+          : matching.reduce((total, order) => total + (order.total || 0), 0);
+      return {
+        month: month.toLocaleString("en", { month: "short" }),
+        revenue: orderRevenue,
+        retail: matching.filter((order) => order.type !== "BULK").length,
+        bulk: matching.filter((order) => order.type === "BULK").length,
+      };
     });
     ok(res, {
       revenue,
@@ -2762,11 +2959,29 @@ router.get(
         (n, h) => n + (h.reservedQuantity || 0),
         0,
       ),
-      surplusRescued: lots.filter((lot) => lot.freshnessState === "SELL_SOON").reduce((total, lot) => total + (lot.availableQuantity || 0), 0),
-      expiredQuantity: lots.filter((lot) => lot.freshnessState === "EXPIRED").reduce((total, lot) => total + (lot.availableQuantity || 0), 0),
+      surplusRescued: lots
+        .filter((lot) => lot.freshnessState === "SELL_SOON")
+        .reduce((total, lot) => total + (lot.availableQuantity || 0), 0),
+      expiredQuantity: lots
+        .filter((lot) => lot.freshnessState === "EXPIRED")
+        .reduce((total, lot) => total + (lot.availableQuantity || 0), 0),
       referenceDelta: 0,
-      onTimeFulfillment: shipments.length ? Math.round((shipments.filter((shipment) => shipment.status !== "DELAYED").length / shipments.length) * 100) : 0,
-      vehicleUtilization: shipments.length ? Math.round(shipments.reduce((total, shipment) => total + (shipment.utilization || 0), 0) / shipments.length) : 0,
+      onTimeFulfillment: shipments.length
+        ? Math.round(
+            (shipments.filter((shipment) => shipment.status !== "DELAYED")
+              .length /
+              shipments.length) *
+              100,
+          )
+        : 0,
+      vehicleUtilization: shipments.length
+        ? Math.round(
+            shipments.reduce(
+              (total, shipment) => total + (shipment.utilization || 0),
+              0,
+            ) / shipments.length,
+          )
+        : 0,
       monthly,
     });
   }),

@@ -41,6 +41,7 @@ import {
   VerifiedBadge,
 } from "../components/UI.jsx";
 import { money, number, relative, shortDate } from "../utils/format.js";
+import SmartImage from '../components/SmartImage.jsx';
 
 const requirementSchema = z.object({
   product: z.string().min(2, "Choose a product"),
@@ -777,6 +778,7 @@ export function QuotationsPage() {
           ? (a, b) => b.seller.rating - a.seller.rating
           : (a, b) => (b.seller.reliability || 0) - (a.seller.reliability || 0),
   );
+  const demandClosed = ["ACCEPTED", "PARTIALLY_FILLED", "CLOSED"].includes(r?.status);
   return (
     <div className="container-page py-10">
       <Link
@@ -820,7 +822,8 @@ export function QuotationsPage() {
                 </div>
               )}
               <div className="flex gap-3">
-                <img
+                <SmartImage
+                  variant="avatar"
                   src={q.seller?.image}
                   alt=""
                   className="h-12 w-12 rounded-2xl object-cover"
@@ -869,14 +872,10 @@ export function QuotationsPage() {
               <p className="mt-5 rounded-xl bg-blue-50 p-3 text-xs leading-5 text-blue-800">
                 {q.note}
               </p>
-              <div className="mt-6 grid grid-cols-2 gap-2">
-                <Link to={`/negotiation/${q._id}`} className="btn-secondary">
-                  Counter offer
-                </Link>
-                <Link to={`/negotiation/${q._id}`} className="btn-primary">
-                  Review & accept
-                </Link>
-              </div>
+              {demandClosed || q.status === "CLOSED" ? <p className="mt-6 rounded-xl bg-gray-100 p-3 text-center text-xs font-bold text-gray-600">This demand has been fulfilled</p> : q.status === "ACCEPTED" ? <p className="mt-6 rounded-xl bg-forest-50 p-3 text-center text-xs font-bold text-forest-800">Accepted offer</p> : <div className="mt-6 grid grid-cols-2 gap-2">
+                <Link to={`/negotiation/${q._id}`} className="btn-secondary">Counter offer</Link>
+                <Link to={`/negotiation/${q._id}`} className="btn-primary">Review & accept</Link>
+              </div>}
             </article>
           ))}
         </div>
@@ -927,6 +926,16 @@ export function NegotiationPage() {
       setAcceptOpen(false);
     },
   });
+  const reject = useMutation({
+    mutationFn: () => getData(api.post(`/quotations/${quotationId}/reject`)),
+    onSuccess: () => {
+      toast.success("Offer rejected");
+      queryClient.invalidateQueries({ queryKey: ["quotation", quotationId] });
+      queryClient.invalidateQueries({ queryKey: ["quotes", data?.quote?.requirementId] });
+      navigate(`/bulk/${data?.quote?.requirementId}/quotations`);
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
   if (isLoading)
     return (
       <div className="container-page py-10">
@@ -957,7 +966,8 @@ export function NegotiationPage() {
             current: true,
           },
         ],
-    current = offers.at(-1);
+    current = offers.at(-1),
+    negotiationLocked = quote.status === "ACCEPTED" || negotiation?.status === "ACCEPTED" || ["ACCEPTED", "PARTIALLY_FILLED", "CLOSED"].includes(requirement.status);
   const openCounter = () => {
     reset({
       pricePerUnit: current.pricePerUnit,
@@ -1095,28 +1105,29 @@ export function NegotiationPage() {
             </div>
           </div>
           <div className="space-y-3 p-6">
+            {negotiationLocked ? <div className="rounded-2xl bg-forest-50 p-4 text-center text-sm font-bold text-forest-800">This offer has been accepted. Counter offers and further changes are closed.</div> : <>
             <button
               className="btn-primary w-full"
               onClick={() => setAcceptOpen(true)}
-              disabled={quote.status === "ACCEPTED"}
             >
               <Check className="h-4 w-4" />
-              {quote.status === "ACCEPTED" ? "Offer accepted" : "Accept offer"}
+              Accept offer
             </button>
             <button
               className="btn-secondary w-full"
               onClick={openCounter}
-              disabled={quote.status === "ACCEPTED"}
             >
               <MessageSquareMore className="h-4 w-4" />
               Counter offer
             </button>
             <button
               className="btn-ghost w-full text-red-600"
-              disabled={quote.status === "ACCEPTED"}
+              onClick={() => reject.mutate()}
+              disabled={reject.isPending}
             >
               Reject offer
             </button>
+            </>}
             <p className="pt-2 text-center text-[11px] leading-5 text-gray-500">
               Accepting locks this negotiation, reserves inventory and creates
               an order snapshot.

@@ -13,4 +13,4 @@ io.use((socket,next)=>{ const token=socket.handshake.auth?.token; if(!token) ret
 io.on('connection',(socket)=>{ if(socket.user?.sub) socket.join(`user:${socket.user.sub}`); });
 app.set('io',io);
 if(env.nodeEnv!=='test') startDevelopmentJobs();
-server.listen(env.port,()=>console.log(`[Kishan Bhaiya] API ready on http://localhost:${env.port} · ${connection.mode} mode`));
+server.listen(env.port,()=>console.log(`[KisanExpress] API ready on http://localhost:${env.port} · ${connection.mode} mode`));

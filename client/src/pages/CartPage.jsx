@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { useAppStore } from "../store/useAppStore.js";
 import { EmptyState, PageHeader } from "../components/UI.jsx";
 import { money } from "../utils/format.js";
+import SmartImage from '../components/SmartImage.jsx';
 
 export default function CartPage() {
   const { t } = useTranslation();
@@ -46,7 +47,7 @@ export default function CartPage() {
                   key={item.productId}
                   className="flex flex-col gap-4 border-b border-gray-100 p-5 last:border-0 sm:flex-row"
                 >
-                  <img
+                  <SmartImage
                     src={item.image}
                     alt={item.name}
                     className="h-28 w-full rounded-2xl object-cover sm:w-32"

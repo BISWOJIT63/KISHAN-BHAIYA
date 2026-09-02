@@ -2,12 +2,12 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Toaster } from "sonner";
 import "leaflet/dist/leaflet.css";
 import "./styles/index.css";
 import "./i18n/index.js";
 import App from "./App.jsx";
 import RealtimeBridge from "./components/RealtimeBridge.jsx";
+import AppToaster from "./components/AppToaster.jsx";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -22,7 +22,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
         <RealtimeBridge />
         <App />
       </BrowserRouter>
-      <Toaster position="top-right" richColors closeButton />
+      <AppToaster />
     </QueryClientProvider>
   </React.StrictMode>,
 );

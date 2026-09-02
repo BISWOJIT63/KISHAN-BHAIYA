@@ -6,6 +6,7 @@ import { api, apiError, getData } from "../api/client.js";
 import { EmptyState, LoadingState, PageHeader, StatusBadge } from "../components/UI.jsx";
 import { useAppStore } from "../store/useAppStore.js";
 import { shortDate } from "../utils/format.js";
+import SmartImage from '../components/SmartImage.jsx';
 
 export default function FpoMembershipPage() {
   const user = useAppStore((state) => state.user);
@@ -59,7 +60,7 @@ export default function FpoMembershipPage() {
               return (
                 <article className="card overflow-hidden" key={fpo.fpoId}>
                   <div className="grid sm:grid-cols-[180px_1fr]">
-                    <img src={fpo.image} alt={fpo.name} className="h-48 w-full object-cover sm:h-full" />
+                    <SmartImage src={fpo.image} alt={fpo.name} className="h-48 w-full object-cover sm:h-full" />
                     <div className="p-6">
                       <div className="flex items-start justify-between gap-3">
                         <div><p className="eyebrow">Verified FPO</p><h2 className="mt-2 font-display text-xl font-bold">{fpo.name}</h2></div>

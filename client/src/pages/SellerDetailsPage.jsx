@@ -23,6 +23,24 @@ import {
   VerifiedBadge,
 } from "../components/UI.jsx";
 import { number } from "../utils/format.js";
+import SmartImage from '../components/SmartImage.jsx';
+import { ReviewList } from './ReviewPages.jsx';
+
+/** Buyer reviews of the producer, from delivered orders only. */
+function SellerReviews({ sellerId }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["seller-reviews", sellerId],
+    queryFn: () => getData(api.get(`/sellers/${sellerId}/reviews`)),
+  });
+  if (isLoading || error) return null;
+  return (
+    <section className="mt-14">
+      <p className="eyebrow">Buyer feedback</p>
+      <h2 className="section-title mb-6 mt-2">What buyers say</h2>
+      <ReviewList reviews={data.reviews} summary={data.summary} />
+    </section>
+  );
+}
 
 export default function SellerDetailsPage() {
   const { id } = useParams();
@@ -61,7 +79,8 @@ export default function SellerDetailsPage() {
         </div>
         <div className="px-6 pb-7 sm:px-9">
           <div className="-mt-16 flex flex-col items-start gap-5 sm:flex-row sm:items-end">
-            <img
+            <SmartImage
+              variant="avatar"
               src={seller.image}
               alt={seller.name}
               className="h-32 w-32 rounded-[28px] border-4 border-white bg-white object-cover shadow-lg"
@@ -216,6 +235,8 @@ export default function SellerDetailsPage() {
           </div>
         )}
       </section>
+
+      <SellerReviews sellerId={seller._id || seller.id || id} />
     </div>
   );
 }

@@ -4,6 +4,10 @@ import { persist } from 'zustand/middleware';
 export const useAppStore=create(persist((set,get)=>({
   user:null,accessToken:null,location:'India',language:'en',cart:[],savedProducts:[],recentProducts:[],cartOpen:false,mobileMenu:false,
   lowBandwidth:false,orderAlerts:true,marketAlerts:true,
+  /** Guided tour: `tourSeen` persists so first-run only fires once; `tourRunning` is session-only. */
+  tourSeen:false,tourRunning:false,
+  startTour:()=>set({tourRunning:true}),
+  endTour:()=>set({tourRunning:false,tourSeen:true}),
   setSession:(user,accessToken)=>set({user,accessToken}),clearSession:()=>set({user:null,accessToken:null}),
   setLocation:(location)=>set({location}),setLanguage:(language)=>set({language}),setCartOpen:(cartOpen)=>set({cartOpen}),setMobileMenu:(mobileMenu)=>set({mobileMenu}),
   setPreferences:(preferences)=>set(preferences),
@@ -13,4 +17,4 @@ export const useAppStore=create(persist((set,get)=>({
   updateCart:(productId,quantity)=>set((state)=>({cart:quantity<=0?state.cart.filter(i=>i.productId!==productId):state.cart.map(i=>i.productId===productId?{...i,quantity:Math.min(quantity,i.availableQuantity)}:i)})),
   removeFromCart:(productId)=>set((state)=>({cart:state.cart.filter(i=>i.productId!==productId)})),clearCart:()=>set({cart:[]}),
   cartCount:()=>get().cart.reduce((n,i)=>n+i.quantity,0)
-}),{name:'kishan-bhaiya-preferences',partialize:(state)=>({user:state.user,accessToken:state.accessToken,location:state.location,language:state.language,cart:state.cart,savedProducts:state.savedProducts,recentProducts:state.recentProducts,lowBandwidth:state.lowBandwidth,orderAlerts:state.orderAlerts,marketAlerts:state.marketAlerts})}));
+}),{name:'kishan-bhaiya-preferences',partialize:(state)=>({user:state.user,accessToken:state.accessToken,location:state.location,language:state.language,cart:state.cart,savedProducts:state.savedProducts,recentProducts:state.recentProducts,lowBandwidth:state.lowBandwidth,orderAlerts:state.orderAlerts,marketAlerts:state.marketAlerts,tourSeen:state.tourSeen})}));

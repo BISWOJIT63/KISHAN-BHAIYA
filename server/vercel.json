@@ -17,6 +17,10 @@
     {
       "path": "/api/v1/jobs/freshness",
       "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/v1/jobs/recurring",
+      "schedule": "15 2 * * *"
     }
   ]
 }

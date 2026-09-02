@@ -10,7 +10,7 @@ describe("role-aware navigation", () => {
   it("shows purchasing and order links to individual buyers", () => {
     expect(navigationForRole("consumer")).toEqual(
       expect.arrayContaining([
-        ["nav.marketplace", "/marketplace"],
+        ["nav.stores", "/stores"],
         ["nav.orders", "/orders"],
       ]),
     );
@@ -21,7 +21,10 @@ describe("role-aware navigation", () => {
     const farmerLinks = navigationForRole("farmer");
     expect(farmerLinks).toContainEqual(["nav.demand", "/demand-board"]);
     expect(farmerLinks).toContainEqual(["nav.producer", "/seller/dashboard"]);
-    expect(farmerLinks).toContainEqual(["nav.fpoMembership", "/fpo/membership"]);
+    expect(farmerLinks).toContainEqual([
+      "nav.fpoMembership",
+      "/fpo/membership",
+    ]);
     expect(farmerLinks).not.toContainEqual(["nav.marketplace", "/marketplace"]);
     expect(farmerLinks.map(([, path]) => path)).not.toContain("/orders");
     expect(workspaceForRole("farmer")).toBe("/seller/dashboard");
@@ -33,16 +36,24 @@ describe("role-aware navigation", () => {
       "nav.recurring",
       "/recurring-procurement",
     ]);
-    expect(canShop("business_buyer")).toBe(true);
+    const paths = navigationForRole("business_buyer").map(([, path]) => path);
+    expect(paths).not.toContain("/stores");
+    expect(paths).not.toContain("/marketplace");
+    expect(paths).not.toContain("/cart");
+    expect(paths).not.toContain("/demand-board");
+    expect(canShop("business_buyer")).toBe(false);
   });
 
   it("keeps guest, FPO and admin navigation out of the buyer marketplace", () => {
     expect(navigationForRole()).toEqual([]);
     expect(canShop()).toBe(false);
-    expect(navigationForRole("fpo_manager").map(([, path]) => path)).not.toContain("/marketplace");
+    expect(
+      navigationForRole("fpo_manager").map(([, path]) => path),
+    ).not.toContain("/marketplace");
     expect(canShop("fpo_manager")).toBe(false);
     expect(navigationForRole("admin")).toEqual([
       ["nav.admin", "/admin"],
+      ["nav.storeOperations", "/admin/stores"],
       ["nav.verifications", "/admin/verifications"],
     ]);
     expect(canShop("admin")).toBe(false);
@@ -55,20 +66,18 @@ describe("role-aware navigation", () => {
     ]);
     expect(canShop("logistics")).toBe(false);
     expect(workspaceForRole("logistics")).toBe("/logistics/planner");
-    expect(navigationForRole("driver")).toEqual([
-      ["nav.logistics", "/logistics"],
-    ]);
-    expect(dashboardNavigationForRole("driver").map(([, path]) => path)).toEqual([
-      "/logistics",
-    ]);
-    expect(workspaceForRole("driver")).toBe("/logistics");
-    expect(canShop("driver")).toBe(false);
   });
 
   it("keeps producer, FPO and logistics workspace features separated", () => {
-    const farmerPaths = dashboardNavigationForRole("farmer").map(([, path]) => path);
-    const fpoPaths = dashboardNavigationForRole("fpo_manager").map(([, path]) => path);
-    const logisticsPaths = dashboardNavigationForRole("logistics").map(([, path]) => path);
+    const farmerPaths = dashboardNavigationForRole("farmer").map(
+      ([, path]) => path,
+    );
+    const fpoPaths = dashboardNavigationForRole("fpo_manager").map(
+      ([, path]) => path,
+    );
+    const logisticsPaths = dashboardNavigationForRole("logistics").map(
+      ([, path]) => path,
+    );
 
     expect(farmerPaths).not.toContain("/fpo/aggregation");
     expect(farmerPaths).not.toContain("/logistics/planner");

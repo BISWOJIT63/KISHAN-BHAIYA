@@ -18,7 +18,7 @@ export function evaluateLoadOpportunity(active, candidate) {
   const reasons = [];
   if (!activeStatuses.has(active.status)) reasons.push("Trip must be in transit before adding another load");
   if (!candidateStatuses.has(candidate.status)) reasons.push("Load is no longer available for consolidation");
-  if (!candidate.dispatchRequired && (candidate.vehicleId || candidate.driverUserId)) reasons.push("Load is already assigned to another trip");
+  if (!candidate.dispatchRequired && (candidate.vehicleId || candidate.fleetPartnerUserId)) reasons.push("Load is already assigned to another trip");
   if (candidate.loadOfferTo && candidate.loadOfferTo !== active._id) reasons.push("Load already has another active offer");
   if (addedLoad <= 0) reasons.push("Load quantity is invalid");
   if (addedLoad > remainingCapacity) reasons.push(`Needs ${addedLoad - remainingCapacity}kg more vehicle capacity`);

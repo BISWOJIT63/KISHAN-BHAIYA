@@ -13,9 +13,9 @@ import {
   EmptyState, ErrorState, InlineLoader, LoadingState, MetricCard, Modal,
   PageHeader, Progress, StatusBadge,
 } from '../components/UI.jsx';
-import { useAppStore } from '../store/useAppStore.js';
 import { number } from '../utils/format.js';
 import { PageMotion, Stagger, StaggerItem } from '../components/Motion.jsx';
+import { useAppStore } from '../store/useAppStore.js';
 
 const refreshLogistics = (queryClient, id) => {
   queryClient.invalidateQueries({ queryKey: ['shipments'] });
@@ -31,23 +31,20 @@ const routeSummary = (shipment) => shipment.nextStop
   : shipment.status === 'DELIVERED' ? 'Route completed' : 'Route is being prepared';
 
 export function LogisticsDashboardPage() {
-  const user = useAppStore((state) => state.user);
-  const isDriver = user?.role === 'driver';
   const { data: shipments = [], isLoading, error, refetch } = useQuery({
     queryKey: ['shipments'],
     queryFn: () => getData(api.get('/shipments')),
+    refetchInterval: 20_000,
   });
   return <PageMotion className="container-page py-10" kind="operations">
     <PageHeader
-      eyebrow={isDriver ? 'My assigned work' : 'Fleet operations control'}
-      title={isDriver ? 'My trips' : 'Shipment dispatch'}
-      description={isDriver
-        ? 'Follow the automatically optimized stop order, record each hand-off, and report delays from one screen.'
-        : 'Dispatch compatible vehicles, monitor route progress, and act on driver exceptions.'}
-      actions={!isDriver && <Link to="/logistics/planner" className="btn-primary"><Route className="h-4 w-4"/>Open dispatch planner</Link>}
+      eyebrow="Fleet operations control"
+      title="Shipment dispatch"
+      description="Dispatch compatible vehicles, monitor route progress, record hand-offs, and resolve route exceptions."
+      actions={<Link to="/logistics/planner" className="btn-primary"><Route className="h-4 w-4"/>Open dispatch planner</Link>}
     />
     <Stagger className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4" kind="operations">
-      <StaggerItem kind="operations"><MetricCard label={isDriver ? 'Ready to start' : 'Ready for pickup'} value={shipments.filter((s) => s.status === 'READY_FOR_PICKUP').length} icon={PackageCheck}/></StaggerItem>
+      <StaggerItem kind="operations"><MetricCard label="Ready for pickup" value={shipments.filter((s) => s.status === 'READY_FOR_PICKUP').length} icon={PackageCheck}/></StaggerItem>
       <StaggerItem kind="operations"><MetricCard label="In transit" value={shipments.filter((s) => ['IN_TRANSIT', 'PICKED_UP'].includes(s.status)).length} icon={Truck} tone="blue"/></StaggerItem>
       <StaggerItem kind="operations"><MetricCard label="Completed" value={shipments.filter((s) => s.status === 'DELIVERED').length} icon={CheckCircle2}/></StaggerItem>
       <StaggerItem kind="operations"><MetricCard label="Needs attention" value={shipments.filter((s) => s.status === 'DELAYED' || s.dispatchRequired).length} icon={AlertTriangle} tone="amber"/></StaggerItem>
@@ -62,17 +59,17 @@ export function LogisticsDashboardPage() {
               {shipment.autoOptimized && <span className="badge bg-violet-50 text-violet-700"><Navigation className="h-3.5 w-3.5"/>Auto route v2</span>}
             </div>
             <p className="mt-3 text-sm font-semibold text-forest-800">Next: {routeSummary(shipment)}</p>
-            <p className="mt-1 text-xs text-gray-500">{shipment.stops?.length || 0} stops · {number(shipment.load)}kg · {shipment.distance}km estimate · {shipment.driver}</p>
+            <p className="mt-1 text-xs text-gray-500">{shipment.stops?.length || 0} stops · {number(shipment.load)}kg · {shipment.distance}km estimate · {shipment.fleetPartner || 'Fleet assignment pending'}</p>
           </div>
           <div className="grid grid-cols-3 gap-3 text-center text-xs sm:min-w-72">
             <div className="rounded-xl bg-cream p-3"><p className="text-gray-500">Capacity</p><p className="mt-1 font-bold">{shipment.utilization ?? 0}%</p></div>
             <div className="rounded-xl bg-cream p-3"><p className="text-gray-500">Saved</p><p className="mt-1 font-bold">{shipment.routeOptimization?.savingsKm || 0}km</p></div>
             <div className="rounded-xl bg-cream p-3"><p className="text-gray-500">Issues</p><p className="mt-1 font-bold">{shipment.issues?.filter((issue) => issue.status === 'OPEN').length || 0}</p></div>
           </div>
-          <Link to={`/shipments/${shipment._id}`} className="btn-primary">{isDriver ? 'Open trip' : 'Manage'} <ArrowRight className="h-4 w-4"/></Link>
+          <Link to={`/shipments/${shipment._id}`} className="btn-primary">Manage <ArrowRight className="h-4 w-4"/></Link>
         </div>
       </article></StaggerItem>)}
-    </Stagger> : <EmptyState title={isDriver ? 'No trips assigned' : 'No shipments'} description={isDriver ? 'A new trip will appear after fleet dispatch assigns it to you.' : 'Accepted bulk plans and confirmed orders create shipments automatically.'}/>} 
+    </Stagger> : <EmptyState title="No shipments" description="Accepted bulk plans and confirmed orders create shipments automatically."/>} 
   </PageMotion>;
 }
 
@@ -89,6 +86,7 @@ export function LogisticsPlannerPage() {
       ]);
       return { shipments, vehicles };
     },
+    refetchInterval: 20_000,
   });
   const shipments = data?.shipments || [];
   const vehicles = data?.vehicles || [];
@@ -119,7 +117,7 @@ export function LogisticsPlannerPage() {
   const dispatch = useMutation({
     mutationFn: () => getData(api.post(`/shipments/${current._id}/dispatch`, { vehicleId })),
     onSuccess: (shipment) => {
-      toast.success('Vehicle and driver dispatched', { description: `Next stop: ${shipment.nextStop?.label}` });
+      toast.success('Vehicle dispatched to your fleet', { description: `Next stop: ${shipment.nextStop?.label}` });
       refreshLogistics(queryClient, shipment._id);
     },
     onError: (requestError) => toast.error(apiError(requestError)),
@@ -128,7 +126,7 @@ export function LogisticsPlannerPage() {
   if (isLoading) return <LoadingState/>;
   if (error) return <ErrorState message={apiError(error)} onRetry={refetch}/>;
   return <>
-    <PageHeader eyebrow="Automatic logistics" title="Fleet dispatch planner" description="Routes obey pickup → hub → delivery constraints. Vehicle capacity, cold-chain needs, verified driver availability, and completed stops are enforced server-side."/>
+    <PageHeader eyebrow="Automatic logistics" title="Fleet dispatch planner" description="Routes obey pickup → hub → delivery constraints. Vehicle capacity, cold-chain needs, fleet assignment, and completed stops are enforced server-side."/>
     <div className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
       <aside className="space-y-5">
         <section className="card p-5">
@@ -136,7 +134,7 @@ export function LogisticsPlannerPage() {
           <div className="mt-4 space-y-2">{activeShipments.map((shipment) => <button key={shipment._id} onClick={() => setSelected(shipment._id)} className={`w-full rounded-2xl border p-4 text-left ${current?._id === shipment._id ? 'border-forest-500 bg-forest-50' : 'border-gray-200 hover:bg-cream'}`}>
             <div className="flex items-center justify-between gap-2"><strong className="text-sm">{shipment._id.toUpperCase()}</strong><StatusBadge status={shipment.status}/></div>
             <p className="mt-2 text-xs text-gray-500">{shipment.stops.length} stops · {number(shipment.load)}kg · {shipment.distance}km</p>
-            {shipment.dispatchRequired && <p className="mt-2 text-xs font-bold text-amber-700">Vehicle or driver needed</p>}
+            {shipment.dispatchRequired && <p className="mt-2 text-xs font-bold text-amber-700">Vehicle assignment needed</p>}
           </button>)}</div>
         </section>
         <section className="card p-5">
@@ -185,7 +183,6 @@ export function ShipmentDetailsPage() {
   const { id } = useParams();
   const queryClient = useQueryClient();
   const user = useAppStore((state) => state.user);
-  const isDriver = user?.role === 'driver';
   const [proofType, setProofType] = useState(null);
   const [proof, setProof] = useState({ receiverName: '', acceptedQuantity: '', rejectedQuantity: 0, notes: '' });
   const [issueOpen, setIssueOpen] = useState(false);
@@ -193,12 +190,28 @@ export function ShipmentDetailsPage() {
   const { data: shipment, isLoading, error, refetch } = useQuery({
     queryKey: ['shipment', id],
     queryFn: () => getData(api.get(`/shipments/${id}`)),
+    refetchInterval: 15_000,
   });
+  useEffect(() => {
+    if (user?.role !== 'driver' || !['IN_TRANSIT', 'PICKED_UP'].includes(shipment?.status) || !navigator.geolocation) return undefined;
+    let lastSentAt = 0;
+    const watcher = navigator.geolocation.watchPosition((position) => {
+      if (Date.now() - lastSentAt < 20_000) return;
+      lastSentAt = Date.now();
+      getData(api.post(`/shipments/${id}/location`, {
+        longitude: position.coords.longitude,
+        latitude: position.coords.latitude,
+        speedKph: position.coords.speed == null ? undefined : Math.max(0, position.coords.speed * 3.6),
+        heading: position.coords.heading == null ? undefined : position.coords.heading,
+      })).then((updated) => queryClient.setQueryData(['shipment', id], updated)).catch(() => {});
+    }, () => {}, { enableHighAccuracy: true, maximumAge: 15_000, timeout: 12_000 });
+    return () => navigator.geolocation.clearWatch(watcher);
+  }, [id, queryClient, shipment?.status, user?.role]);
   const inTransit = ['IN_TRANSIT', 'PICKED_UP'].includes(shipment?.status);
   const { data: loadPool } = useQuery({
     queryKey: ['load-opportunities', id],
     queryFn: () => getData(api.get(`/shipments/${id}/load-opportunities`)),
-    enabled: Boolean(shipment && inTransit && !isDriver),
+    enabled: Boolean(shipment && inTransit),
   });
   const optimize = useMutation({
     mutationFn: () => getData(api.post(`/shipments/${id}/optimize`)),
@@ -278,12 +291,12 @@ export function ShipmentDetailsPage() {
   if (isLoading) return <div className="container-page py-10"><LoadingState cards={2}/></div>;
   if (error) return <div className="container-page py-10"><ErrorState message={apiError(error)} onRetry={refetch}/></div>;
   const nextStop = shipment.nextStop || shipment.stops.find((stop) => stop.status === 'NEXT');
-  const pendingOffers = (shipment.loadOffers || []).filter((offer) => offer.status === 'PENDING_DRIVER');
+  const pendingOffers = (shipment.loadOffers || []).filter((offer) => offer.status === 'PENDING_FLEET');
   const opportunities = loadPool?.opportunities || [];
   return <div className="container-page py-10">
-    <Link to="/logistics" className="mb-6 inline-flex items-center gap-2 text-sm font-bold text-forest-700"><ChevronLeft className="h-4 w-4"/>{isDriver ? 'My trips' : 'All shipments'}</Link>
+    <Link to="/logistics" className="mb-6 inline-flex items-center gap-2 text-sm font-bold text-forest-700"><ChevronLeft className="h-4 w-4"/>All shipments</Link>
     <PageHeader
-      eyebrow={isDriver ? 'Driver trip workspace' : 'Fleet shipment control'}
+      eyebrow="Fleet shipment control"
       title={shipment._id.toUpperCase()}
       description={`${shipment.stops.length} stops · ${shipment.orderIds.length} order${shipment.orderIds.length === 1 ? '' : 's'} · automatic pickup-first routing`}
       actions={<><StatusBadge status={shipment.status}/><button className="btn-secondary" onClick={() => optimize.mutate()} disabled={optimize.isPending}><Route className="h-4 w-4"/>Recalculate</button>{!shipment.startedAt && shipment.status !== 'DELIVERED' && <button className="btn-primary" onClick={() => start.mutate()} disabled={start.isPending}><Play className="h-4 w-4"/>Start trip</button>}</>}
@@ -292,6 +305,7 @@ export function ShipmentDetailsPage() {
       <div><p className="text-xs font-bold uppercase tracking-[.2em] text-forest-100">Next stop · {nextStop.type}</p><h2 className="mt-2 font-display text-2xl font-bold">{nextStop.label}</h2><p className="mt-2 text-sm text-forest-100">Stop {nextStop.sequence} of {shipment.stops.length} · complete stops in this optimized order.</p></div>
       <button className="btn bg-white text-forest-800 hover:bg-cream" onClick={() => completeStop.mutate(nextStop)} disabled={completeStop.isPending}>{completeStop.isPending ? <InlineLoader/> : <><CheckCircle2 className="h-4 w-4"/>Complete this stop</>}</button>
     </section>}
+    {shipment.liveLocation && <section className="mb-6 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950"><div className="flex flex-wrap items-center justify-between gap-2"><strong>Live route update</strong><span className="badge bg-white text-blue-800">GPS updated {new Date(shipment.liveLocation.updatedAt).toLocaleTimeString()}</span></div><div className="mt-3 grid gap-3 sm:grid-cols-3"><p><span className="text-blue-700">Progress</span><br/><strong>{shipment.routeProgress?.progressPercent || 0}% · {shipment.routeProgress?.completedStops || 0}/{shipment.routeProgress?.totalStops || shipment.stops.length} stops</strong></p><p><span className="text-blue-700">Remaining route</span><br/><strong>{shipment.remainingDistance ?? shipment.distance}km · {shipment.remainingDuration ?? shipment.duration} min</strong></p><p><span className="text-blue-700">Estimated arrival</span><br/><strong>{shipment.estimatedArrival ? new Date(shipment.estimatedArrival).toLocaleTimeString() : 'Calculating'}</strong></p></div></section>}
     <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
       <div className="space-y-6">
         {pendingOffers.map((offer) => <section key={offer.id} className="rounded-3xl border border-blue-200 bg-blue-50 p-6">
@@ -308,11 +322,11 @@ export function ShipmentDetailsPage() {
             </div>
             <div className="flex shrink-0 flex-wrap gap-2">
               <button className="btn-secondary" onClick={() => respondToLoad.mutate({ offerId: offer.id, action: 'DECLINE' })} disabled={respondToLoad.isPending}><XCircle className="h-4 w-4"/>Decline</button>
-              <button className="btn-primary" onClick={() => respondToLoad.mutate({ offerId: offer.id, action: 'ACCEPT' })} disabled={respondToLoad.isPending}><Navigation className="h-4 w-4"/>{isDriver ? 'Accept & re-optimize' : 'Merge now'}</button>
+              <button className="btn-primary" onClick={() => respondToLoad.mutate({ offerId: offer.id, action: 'ACCEPT' })} disabled={respondToLoad.isPending}><Navigation className="h-4 w-4"/>Accept & re-optimize</button>
             </div>
           </div>
         </section>)}
-        {!isDriver && inTransit && <section className="card p-6">
+        {inTransit && <section className="card p-6">
           <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
             <div><p className="eyebrow">Capacity sharing</p><h2 className="mt-2 font-display text-xl font-bold">Compatible extra loads</h2><p className="mt-2 text-sm text-gray-500">Only unassigned loads that fit this vehicle, temperature mode, and detour limit are shown.</p></div>
             <span className="badge bg-forest-50 text-forest-700">{number(loadPool?.remainingCapacity || 0)}kg free</span>
@@ -320,12 +334,12 @@ export function ShipmentDetailsPage() {
           <div className="mt-5 space-y-3">
             {opportunities.map((opportunity) => <article key={opportunity.candidateShipmentId} className="flex flex-col justify-between gap-4 rounded-2xl border border-gray-100 p-4 sm:flex-row sm:items-center">
               <div><div className="flex flex-wrap items-center gap-2"><strong>{opportunity.product}</strong><span className="badge bg-blue-50 text-blue-700">{number(opportunity.addedLoad)}kg</span></div><p className="mt-2 text-xs leading-5 text-gray-500">{opportunity.pickup} → {opportunity.delivery} · +{opportunity.detourKm}km · {opportunity.utilizationAfter}% full after loading</p></div>
-              <button className="btn-secondary shrink-0" onClick={() => proposeLoad.mutate(opportunity.candidateShipmentId)} disabled={proposeLoad.isPending}><PackagePlus className="h-4 w-4"/>Send to driver</button>
+              <button className="btn-secondary shrink-0" onClick={() => proposeLoad.mutate(opportunity.candidateShipmentId)} disabled={proposeLoad.isPending}><PackagePlus className="h-4 w-4"/>Review load</button>
             </article>)}
             {!opportunities.length && <p className="rounded-2xl bg-cream p-4 text-sm text-gray-500">No unassigned load currently meets every capacity, cold-chain, and route rule.</p>}
           </div>
         </section>}
-        <RouteMap stops={shipment.stops} className="h-[500px]"/>
+        <RouteMap stops={shipment.stops} liveLocation={shipment.liveLocation} className="h-[500px]"/>
         <section className="card p-6">
           <div className="flex items-center justify-between"><div><h2 className="font-display text-xl font-bold">Route stops</h2><p className="mt-1 text-xs text-gray-500">Completed stops stay fixed when the route recalculates.</p></div><span className="badge bg-violet-50 text-violet-700"><Navigation className="h-3.5 w-3.5"/>Auto v{shipment.routeOptimization?.version || 2}</span></div>
           <div className="mt-6">{shipment.stops.map((stop, index) => <div className="flex gap-4" key={stop.id || `${stop.label}-${index}`}>
@@ -336,8 +350,8 @@ export function ShipmentDetailsPage() {
       </div>
       <aside className="space-y-5">
         <section className="card p-6">
-          <h2 className="font-display text-lg font-bold">Vehicle & driver</h2>
-          <div className="mt-4 rounded-2xl bg-cream p-4"><p className="font-bold">{shipment.vehicle}</p><p className="mt-2 text-sm text-gray-600">{shipment.driver}</p><p className="mt-1 text-xs font-bold text-forest-700">{shipment.phone || 'Contact protected'}</p></div>
+          <h2 className="font-display text-lg font-bold">Vehicle & fleet partner</h2>
+          <div className="mt-4 rounded-2xl bg-cream p-4"><p className="font-bold">{shipment.vehicle}</p><p className="mt-2 text-sm text-gray-600">{shipment.fleetPartner || 'Fleet assignment pending'}</p><p className="mt-1 text-xs font-bold text-forest-700">{shipment.phone || 'Contact protected'}</p></div>
           <div className="mt-5"><Progress value={shipment.utilization} label={`${number(shipment.load)} / ${number(shipment.capacity)}kg capacity`}/></div>
           <dl className="mt-5 space-y-3 text-sm"><div className="flex justify-between"><dt className="text-gray-500">Distance</dt><dd className="font-bold">{shipment.distance}km est.</dd></div><div className="flex justify-between"><dt className="text-gray-500">Duration</dt><dd className="font-bold">{shipment.duration} min</dd></div><div className="flex justify-between"><dt className="text-gray-500">Fuel estimate</dt><dd className="font-bold">{shipment.estimatedFuelLitres || 0}L</dd></div><div className="flex justify-between"><dt className="text-gray-500">Route savings</dt><dd className="font-bold">{shipment.routeOptimization?.savingsKm || 0}km</dd></div></dl>
         </section>

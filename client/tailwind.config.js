@@ -3,6 +3,9 @@ export default {
   content: ['./index.html', './src/**/*.{js,jsx}'],
   theme: {
     extend: {
+      // Small phones (360-400px) are the primary form factor for farmer users,
+      // so we need a breakpoint below Tailwind's 640px `sm`.
+      screens: { xs: '400px' },
       colors: {
         forest: { 50: '#eff7f2', 100: '#daede0', 200: '#b7dcc4', 300: '#88c3a0', 400: '#55a578', 500: '#34885e', 600: '#256d4a', 700: '#1e573c', 800: '#194632', 900: '#153d2e', 950: '#0a2119' },
         cream: '#f7f6ef',

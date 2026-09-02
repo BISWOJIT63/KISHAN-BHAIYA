@@ -7,7 +7,7 @@ export const connectDatabase = async () => {
     return { connected: true, mode: 'mongodb' };
   } catch (error) {
     if (!env.allowMemoryFallback || env.nodeEnv === 'production') throw error;
-    console.warn('[Kishan Bhaiya] MongoDB unavailable; using labelled development memory store. Run MongoDB and npm run seed for persistent mode.');
+    console.warn('[KisanExpress] MongoDB unavailable; using labelled development memory store. Run MongoDB and npm run seed for persistent mode.');
     return { connected: false, mode: 'memory' };
   }
 };

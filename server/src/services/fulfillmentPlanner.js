@@ -9,6 +9,7 @@ export function buildShipmentDrafts({
   allocations,
   vehicles = [],
   drivers = [],
+  fleetPartners = [],
   hubs = [],
 }) {
   const deliveryCoordinates = safeCoordinates(requirement.coordinates, [85.8245, 20.2961]);
@@ -16,9 +17,13 @@ export function buildShipmentDrafts({
   const usableVehicles = vehicles
     .filter((vehicle) => Number(vehicle.capacity) > 0 && ["AVAILABLE", "IDLE"].includes(vehicle.status))
     .sort((first, second) => Number(first.capacity) - Number(second.capacity));
-  const activeDrivers = drivers.filter((driver) => driver.role === "driver" && driver.accountStatus === "ACTIVE" && !driver.currentShipmentId);
+  const activeFleetPartners = fleetPartners.filter((partner) => (
+    partner.role === "logistics_partner" && partner.accountStatus === "ACTIVE"
+  ));
+  const activeDrivers = drivers.filter((driver) => (
+    driver.role === "driver" && driver.accountStatus === "ACTIVE" && !driver.currentShipmentId
+  ));
   const usedVehicles = new Set();
-  const usedDrivers = new Set();
   const drafts = [];
 
   while (queue.some((allocation) => allocation.remaining > 0)) {
@@ -52,11 +57,12 @@ export function buildShipmentDrafts({
     const coldChainRequired = segments.some((segment) => segment.coldChainRequired);
     if (!load) break;
 
-    let driver = activeDrivers.find((candidate) => candidate._id === vehicle?.driverUserId && !usedDrivers.has(candidate._id));
-    driver ||= activeDrivers.find((candidate) => !usedDrivers.has(candidate._id));
-    const assigned = Boolean(vehicle && driver);
+    let fleetPartner = activeFleetPartners.find((candidate) => candidate._id === vehicle?.fleetPartnerUserId);
+    fleetPartner ||= activeFleetPartners[0];
+    let driver = activeDrivers.find((candidate) => candidate._id === vehicle?.driverUserId);
+    driver ||= activeDrivers[0];
+    const assigned = Boolean(vehicle && fleetPartner && driver);
     if (vehicle) usedVehicles.add(vehicle._id);
-    if (driver) usedDrivers.add(driver._id);
 
     const groupedPickups = Object.values(segments.reduce((groups, segment) => {
       groups[segment.sellerId] ||= { ...segment, quantity: 0, subFulfillmentIds: [] };
@@ -106,7 +112,9 @@ export function buildShipmentDrafts({
       vehicle: vehicle ? `${vehicle.registration} · ${vehicle.type}` : "Vehicle assignment pending",
       driverUserId: driver?._id || null,
       driver: driver?.name || "Driver assignment pending",
-      phone: driver?.phone ? `•••• ${String(driver.phone).slice(-4)}` : "Protected until assignment",
+      fleetPartnerUserId: fleetPartner?._id || null,
+      fleetPartner: fleetPartner?.name || "Fleet assignment pending",
+      phone: fleetPartner?.phone ? `•••• ${String(fleetPartner.phone).slice(-4)}` : "Protected until assignment",
       capacity: tripCapacity,
       load,
       coldChain: Boolean(vehicle?.coldChain),

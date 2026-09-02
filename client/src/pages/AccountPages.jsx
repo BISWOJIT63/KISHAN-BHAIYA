@@ -154,6 +154,7 @@ export function ProfilePage() {
     setSession(data.user, data.accessToken || accessToken);
     if (data.user.location) setLocation(data.user.location);
     setPreferenceCoordinates(data.user.locationCoordinates || null);
+    queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
   };
   const startEditing = () => {
     setEditValues({

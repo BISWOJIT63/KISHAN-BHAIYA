@@ -3,26 +3,30 @@ import {
   Bell,
   ChevronDown,
   Heart,
+  LifeBuoy,
   LogOut,
   MapPin,
   Menu,
-  Search,
   ShoppingBasket,
   UserRound,
   X,
 } from "lucide-react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { api, getData } from "../api/client.js";
+import { api } from "../api/client.js";
 import { useAppStore } from "../store/useAppStore.js";
-import { cx, relative, money } from "../utils/format.js";
+import { cx, money } from "../utils/format.js";
 import {
   canShop,
   navigationForRole,
   workspaceForRole,
 } from "../utils/navigation.js";
+import { navIconFor } from "../utils/navIcons.js";
 import Logo from "./Logo.jsx";
+import LanguageSwitcher from "./LanguageSwitcher.jsx";
+import NotificationBell from "./NotificationBell.jsx";
+import SmartImage from "./SmartImage.jsx";
 import { EmptyState } from "./UI.jsx";
 import UserAvatar from "./UserAvatar.jsx";
 export default function Navbar() {
@@ -39,34 +43,13 @@ export default function Navbar() {
     setCartOpen,
     setMobileMenu,
     clearSession,
+    startTour,
   } = useAppStore();
   const accountActive = !user || (user.accountStatus || (user.verified ? "ACTIVE" : "PENDING_ADMIN_APPROVAL")) === "ACTIVE";
   const nav = user && !accountActive ? [["Verification center", "/verification"]] : navigationForRole(user?.role);
   const shoppingEnabled = accountActive && canShop(user?.role);
   const count = cart.reduce((n, i) => n + i.quantity, 0);
-  const [notificationsOpen, setNotificationsOpen] = React.useState(false);
   const [profileOpen, setProfileOpen] = React.useState(false);
-  const { data: notifications = [] } = useQuery({
-    queryKey: ["notifications"],
-    queryFn: () => getData(api.get("/notifications")),
-    staleTime: 20000,
-    enabled: Boolean(user) && accountActive,
-  });
-  const markNotifications = useMutation({
-    mutationFn: async (ids) =>
-      Promise.all(ids.map((id) => api.patch(`/notifications/${id}/read`))),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications"] }),
-  });
-  const openNotification = (notification) => {
-    if (!notification.read) markNotifications.mutate([notification._id]);
-    setNotificationsOpen(false);
-    if (notification.type?.startsWith("FPO_MEMBERSHIP"))
-      navigate("/fpo/membership");
-    else if (notification.entityId?.startsWith("ship"))
-      navigate(`/shipments/${notification.entityId}`);
-    else if (notification.entityId?.startsWith("quote"))
-      navigate(`/negotiation/${notification.entityId}`);
-  };
   const logout = async () => {
     try {
       await api.post("/auth/logout");
@@ -81,40 +64,47 @@ export default function Navbar() {
   return (
     <>
       <header className="sticky top-0 z-50 border-b border-forest-900/10 bg-cream/95 backdrop-blur-xl">
-        <div className="container-page flex h-[72px] items-center gap-5">
+        <div className="public-service-strip">
+          <div className="container-page flex h-8 items-center justify-between gap-3 text-[11px] font-semibold">
+            <span>Public-service style agriculture portal</span>
+            <span className="hidden sm:inline">Role-based services · Accessible language choices</span>
+          </div>
+        </div>
+        {/* Tight gaps + a shrinkable logo keep this single row inside a 320px
+            viewport. Anything added here must be hidden below `md`. */}
+        <div className="container-page flex h-[72px] items-center gap-2 sm:gap-4">
           <Logo />
-          <nav className="ml-6 hidden items-center gap-1 lg:flex">
-            {nav.map(([label, to]) => (
-              <NavLink
-                key={to}
-                to={to}
-                className={({ isActive }) =>
-                  cx(
-                    "rounded-xl px-3 py-2 text-sm font-semibold",
-                    isActive
-                      ? "bg-forest-50 text-forest-800"
-                      : "text-gray-600 hover:text-forest-800",
-                  )
-                }
-              >
-                {t(label)}
-              </NavLink>
-            ))}
+          <nav className="ml-2 hidden min-w-0 items-center gap-0.5 lg:flex xl:ml-4 xl:gap-1">
+            {nav.map(([label, to]) => {
+              const [Icon, iconColor] = navIconFor(label);
+              return (
+                <NavLink
+                  key={to}
+                  to={to}
+                  className={({ isActive }) =>
+                    cx(
+                      "flex items-center gap-2 whitespace-nowrap rounded-xl px-2.5 py-2 text-[13px] font-semibold xl:px-3 xl:text-sm",
+                      isActive
+                        ? "bg-forest-50 text-forest-800"
+                        : "text-gray-600 hover:text-forest-800",
+                    )
+                  }
+                >
+                  {/* Icons only where there is room for them; the mobile menu and
+                      bottom tab bar carry the icon language on small screens. */}
+                  <Icon className={cx("hidden h-4 w-4 shrink-0 xl:block", iconColor)} />
+                  {t(label)}
+                </NavLink>
+              );
+            })}
           </nav>
-          <div className="ml-auto flex items-center gap-1.5">
-            {shoppingEnabled && <button type="button" className="btn-ghost hidden max-w-52 px-2 md:flex" onClick={() => navigate("/profile")} title="Change delivery location in profile settings">
+          <div className="ml-auto flex shrink-0 items-center gap-0.5 sm:gap-1.5">
+            {shoppingEnabled && <button type="button" className="btn-ghost hidden max-w-52 px-2 xl:flex" onClick={() => navigate("/profile")} title="Change delivery location in profile settings">
               <MapPin className="h-4 w-4 text-forest-600" />
               <span className="max-w-36 truncate text-sm">{location}</span>
             </button>}
             {shoppingEnabled && <button
-              className="btn-ghost hidden px-2 sm:flex"
-              aria-label="Search"
-              onClick={() => navigate("/marketplace")}
-            >
-              <Search className="h-5 w-5" />
-            </button>}
-            {shoppingEnabled && <button
-              className="btn-ghost relative hidden h-10 px-2 sm:flex"
+              className="btn-ghost relative hidden h-11 w-11 px-0 md:flex"
               onClick={() => navigate("/saved")}
               aria-label={t("nav.saved")}
             >
@@ -125,84 +115,25 @@ export default function Navbar() {
                 </span>
               )}
             </button>}
-            {user && <div className="relative hidden sm:block">
-              <button
-                className="btn-ghost h-10 px-2"
-                onClick={() => setNotificationsOpen(!notificationsOpen)}
-                aria-label="Notifications"
-              >
-                <Bell className="h-5 w-5" />
-                {notifications.some((n) => !n.read) && (
-                  <span className="absolute right-1 top-1 h-2.5 w-2.5 rounded-full border-2 border-cream bg-harvest" />
-                )}
-              </button>
-              {notificationsOpen && (
-                <div className="card absolute right-0 top-12 z-50 w-[360px] max-w-[90vw] overflow-hidden shadow-lift">
-                  <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
-                    <h3 className="font-display font-bold">{t("notifications.title")}</h3>
-                    {notifications.some((n) => !n.read) && (
-                      <button
-                        className="text-xs font-bold text-forest-700"
-                        onClick={() =>
-                          markNotifications.mutate(
-                            notifications.filter((n) => !n.read).map((n) => n._id),
-                          )
-                        }
-                      >
-                        {t("notifications.markAll")}
-                      </button>
-                    )}
-                  </div>
-                  <div className="max-h-[420px] overflow-auto">
-                    {notifications.length ? (
-                      notifications.slice(0, 6).map((n) => (
-                        <button
-                          key={n._id}
-                          className="block w-full border-b border-gray-100 px-5 py-4 text-left hover:bg-forest-50/60"
-                          onClick={() => openNotification(n)}
-                        >
-                          <div className="flex gap-3">
-                            <span
-                              className={cx(
-                                "mt-1 h-2 w-2 shrink-0 rounded-full",
-                                n.read ? "bg-gray-200" : "bg-harvest",
-                              )}
-                            />
-                            <div>
-                              <p className="text-sm font-bold text-gray-800">
-                                {n.title}
-                              </p>
-                              <p className="mt-1 text-xs leading-5 text-gray-500">
-                                {n.message}
-                              </p>
-                              <p className="mt-2 text-[11px] font-medium text-gray-400">
-                                {relative(n.createdAt)}
-                              </p>
-                            </div>
-                          </div>
-                        </button>
-                      ))
-                    ) : (
-                      <EmptyState title={t("notifications.empty")} />
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>}
+            <LanguageSwitcher variant="header" className="hidden md:flex" />
+            {user && <NotificationBell />}
             {shoppingEnabled && <button
-              className="btn-ghost relative h-10 px-2"
+              data-tour="cart"
+              className="btn-ghost relative h-11 w-11 px-0"
               onClick={() => setCartOpen(true)}
-              aria-label="Open cart"
+              aria-label={t("cart.open")}
             >
               <ShoppingBasket className="h-5 w-5" />
               {count > 0 && (
-                <span className="absolute -right-0.5 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-harvest px-1 text-[10px] font-extrabold text-amber-950">
+                <span className="absolute -right-0.5 -top-0.5 grid h-5 min-w-5 place-items-center rounded-full border-2 border-cream bg-harvest px-1 text-[10px] font-extrabold text-amber-950">
                   {count}
                 </span>
               )}
             </button>}
             {user ? (
-              <div className="relative hidden sm:block">
+              // Below lg the mobile menu already carries profile + sign out, so
+              // this dropdown would be a duplicate entry point.
+              <div className="relative hidden lg:block">
                 <button
                   className="flex h-10 items-center gap-2 rounded-xl px-2 hover:bg-forest-50"
                   onClick={() => setProfileOpen(!profileOpen)}
@@ -260,7 +191,7 @@ export default function Navbar() {
                 )}
               </div>
             ) : (
-              <div className="hidden gap-2 sm:flex">
+              <div className="hidden gap-2 md:flex">
                 <Link to="/login" className="btn-ghost">
                   {t("nav.login")}
                 </Link>
@@ -270,9 +201,11 @@ export default function Navbar() {
               </div>
             )}
             <button
-              className="btn-ghost h-10 px-2 lg:hidden"
+              data-tour="menu"
+              className="btn-ghost h-11 w-11 px-0 lg:hidden"
               onClick={() => setMobileMenu(!mobileMenu)}
-              aria-label="Open menu"
+              aria-label={t("nav.menu")}
+              aria-expanded={mobileMenu}
             >
               {mobileMenu ? (
                 <X className="h-5 w-5" />
@@ -283,18 +216,66 @@ export default function Navbar() {
           </div>
         </div>
         {mobileMenu && (
-          <div className="border-t border-gray-200 bg-white px-4 py-4 lg:hidden">
+          <div className="max-h-[calc(100vh-72px)] overflow-y-auto border-t border-gray-200 bg-white px-4 py-4 lg:hidden">
             <nav className="container-page grid gap-1 px-0">
-              {nav.map(([label, to]) => (
+              {/* Language first: it is the one control that unlocks every other
+                  label on the page for a non-English reader. */}
+              <div className="mb-2 md:hidden">
+                <p className="mb-1.5 px-1 text-xs font-bold uppercase tracking-[.14em] text-gray-500">
+                  {t("language.label")}
+                </p>
+                <LanguageSwitcher variant="segmented" />
+              </div>
+              {nav.map(([label, to]) => {
+                const [Icon, iconColor, iconBg] = navIconFor(label);
+                return (
+                  <Link
+                    key={to}
+                    to={to}
+                    className="flex items-center gap-3 rounded-xl px-3 py-3 text-base font-semibold text-gray-700 hover:bg-forest-50"
+                    onClick={() => setMobileMenu(false)}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={cx("grid h-10 w-10 shrink-0 place-items-center rounded-xl", iconBg)}
+                    >
+                      <Icon className={cx("h-5 w-5", iconColor)} />
+                    </span>
+                    {t(label)}
+                  </Link>
+                );
+              })}
+              {user && (
                 <Link
-                  key={to}
-                  to={to}
-                  className="rounded-xl px-3 py-3 font-semibold text-gray-700 hover:bg-forest-50"
+                  to="/notifications"
+                  className="flex items-center gap-3 rounded-xl px-3 py-3 text-base font-semibold text-gray-700 hover:bg-forest-50"
                   onClick={() => setMobileMenu(false)}
                 >
-                  {t(label)}
+                  <span
+                    aria-hidden="true"
+                    className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-harvest/20"
+                  >
+                    <Bell className="h-5 w-5 text-amber-700" />
+                  </span>
+                  {t("notifications.title")}
                 </Link>
-              ))}
+              )}
+              <button
+                type="button"
+                className="flex items-center gap-3 rounded-xl px-3 py-3 text-left text-base font-semibold text-gray-700 hover:bg-forest-50"
+                onClick={() => {
+                  setMobileMenu(false);
+                  startTour();
+                }}
+              >
+                <span
+                  aria-hidden="true"
+                  className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-sky-100"
+                >
+                  <LifeBuoy className="h-5 w-5 text-sky-700" />
+                </span>
+                {t("tour.replay")}
+              </button>
               {!user && (
                 <div className="mt-2 grid grid-cols-2 gap-2">
                   <Link to="/login" className="btn-secondary">
@@ -361,7 +342,7 @@ export default function Navbar() {
                     key={item.productId}
                     className="mb-4 flex gap-3 border-b border-gray-100 pb-4"
                   >
-                    <img
+                    <SmartImage
                       src={item.image}
                       alt=""
                       className="h-20 w-20 rounded-2xl object-cover"
