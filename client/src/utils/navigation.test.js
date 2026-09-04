@@ -11,6 +11,7 @@ describe("role-aware navigation", () => {
     expect(navigationForRole("consumer")).toEqual(
       expect.arrayContaining([
         ["nav.stores", "/stores"],
+        ["nav.marketplace", "/marketplace"],
         ["nav.orders", "/orders"],
       ]),
     );

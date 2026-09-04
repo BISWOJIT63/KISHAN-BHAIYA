@@ -410,7 +410,7 @@ export function NewRequirementPage() {
                   Allow partial fulfilment from multiple suppliers
                 </strong>
                 <span className="mt-1 block text-xs leading-5 text-forest-700">
-                  Kishan Bhaiya may suggest a transparent combination when one
+                  KISHAN BHAIYA may suggest a transparent combination when one
                   seller cannot cover the full amount.
                 </span>
               </span>

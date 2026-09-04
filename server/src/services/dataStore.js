@@ -73,6 +73,8 @@ class DataStore {
       "user-business",
       "user-farmer",
       "user-fpo",
+      "user-fpo-puri",
+      "user-fpo-balasore",
       "user-logistics",
       "user-admin",
       "user-driver",

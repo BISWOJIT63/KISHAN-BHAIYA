@@ -12,7 +12,7 @@ export default function CartPage() {
   const subtotal = cart.reduce(
     (total, item) =>
       total +
-      (item.quantity >= item.bulkThreshold ? item.bulkPrice : item.price) *
+      (!item.storeId && item.quantity >= item.bulkThreshold ? item.bulkPrice : item.price) *
         item.quantity,
     0,
   );
@@ -40,7 +40,7 @@ export default function CartPage() {
         <div className="grid items-start gap-7 lg:grid-cols-[1fr_380px]">
           <section className="card overflow-hidden">
             {cart.map((item) => {
-              const bulk = item.quantity >= item.bulkThreshold;
+              const bulk = !item.storeId && item.quantity >= item.bulkThreshold;
               const price = bulk ? item.bulkPrice : item.price;
               return (
                 <article
@@ -62,7 +62,7 @@ export default function CartPage() {
                           {item.name}
                         </Link>
                         <p className="mt-1 text-xs text-gray-500">
-                          {t("cart.soldBy", { seller: item.seller })}
+                          {item.storeName ? `Fulfilled by ${item.storeName}` : t("cart.soldBy", { seller: item.seller })}
                         </p>
                         {bulk && (
                           <span className="badge mt-2 bg-forest-50 text-forest-700">

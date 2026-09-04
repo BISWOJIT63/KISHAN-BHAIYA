@@ -2,9 +2,15 @@ import { store } from "./dataStore.js";
 import { HttpError } from "../utils/http.js";
 
 const dayIndex = new Map(
-  ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map(
-    (day, index) => [day.toLowerCase(), index],
-  ),
+  [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+  ].map((day, index) => [day.toLowerCase(), index]),
 );
 
 const asDate = (value) => {
@@ -48,7 +54,8 @@ export function nextRecurringRun(plan, from = new Date(), initial = false) {
   }
 
   const candidate = new Date(now);
-  if (plan.frequency === "BIWEEKLY") candidate.setDate(candidate.getDate() + 14);
+  if (plan.frequency === "BIWEEKLY")
+    candidate.setDate(candidate.getDate() + 14);
   else candidate.setMonth(candidate.getMonth() + 1);
   return alignToPreferredDay(candidate, plan.weekdays, 7).toISOString();
 }
@@ -76,7 +83,11 @@ export async function generateRecurringRequirement(
       requiredDate.getDate() + Number(plan.leadTimeDays || 5),
     );
     const targetPrice = Array.isArray(plan.priceBand)
-      ? Number(((Number(plan.priceBand[0]) + Number(plan.priceBand[1])) / 2).toFixed(2))
+      ? Number(
+          ((Number(plan.priceBand[0]) + Number(plan.priceBand[1])) / 2).toFixed(
+            2,
+          ),
+        )
       : undefined;
     const requirement = await store.create(
       "requirements",

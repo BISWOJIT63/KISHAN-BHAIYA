@@ -3,6 +3,7 @@ dist/
 .env
 *.log
 coverage/
+tmp/
 server/uploads/*
 !server/uploads/.gitkeep
 .DS_Store

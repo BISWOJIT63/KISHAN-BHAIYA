@@ -74,7 +74,7 @@ export default function DashboardLayout() {
             )})}
           </nav>
         </aside>
-        <main className="min-w-0 py-2">
+        <main id="main-content" tabIndex="-1" className="min-w-0 py-2">
           <Outlet />
         </main>
       </div>

@@ -22,7 +22,7 @@ export function optimizeRoute(stops = [], vehicle = {}, options = {}) {
     distance: 0,
     duration: 0,
     utilization: vehicle.capacity ? 0 : null,
-    provider: "KisanExpress constrained route estimate",
+    provider: "KISHAN BHAIYA constrained route estimate",
     assumptions: "No route stops supplied",
     routeOptimization: { version: 2, trigger: options.trigger || "AUTOMATIC", savingsKm: 0, warnings: [] },
   };
@@ -74,7 +74,7 @@ export function optimizeRoute(stops = [], vehicle = {}, options = {}) {
     estimatedFuelLitres: Number((distance / (vehicle.coldChain ? 8 : 12)).toFixed(1)),
     capacityExceeded: Boolean(vehicle.capacity && Number(vehicle.load || 0) > Number(vehicle.capacity)),
     nextStop: sequencedStops.find((stop) => stop.status === "NEXT") || null,
-    provider: "KisanExpress constrained route estimate (automatic nearest-neighbour)",
+    provider: "KISHAN BHAIYA constrained route estimate (automatic nearest-neighbour)",
     assumptions: "Completed stops stay fixed; pickups precede hubs and deliveries; average speed 32 km/h plus 18 minutes handling per intermediate stop",
     routeOptimization: {
       version: 2,

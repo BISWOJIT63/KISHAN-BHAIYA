@@ -19,6 +19,10 @@ import {
   Truck,
   CheckCircle2,
   Navigation,
+  Star,
+  Zap,
+  TrendingDown,
+  Sparkles,
 } from "lucide-react";
 import { api, apiError, getData } from "../../api/client.js";
 import { useAppStore } from "../../store/useAppStore.js";
@@ -41,7 +45,7 @@ const ownershipLabel = (type) =>
 export const defaultFallbackStores = [
   {
     _id: "store-govt-bbsr",
-    name: "KisanExpress Jan Seva Fresh Store - Patia",
+    name: "KISHAN BHAIYA Jan Seva Fresh Store - Patia",
     ownershipType: "GOVERNMENT",
     operatorName: "Public Market Operations",
     locationName: "Patia, Bhubaneswar",
@@ -121,7 +125,7 @@ export const defaultFallbackStores = [
   },
   {
     _id: "store-franchise-sahidnagar",
-    name: "KisanExpress Sahid Nagar Fresh Point",
+    name: "KISHAN BHAIYA Sahid Nagar Fresh Point",
     ownershipType: "FRANCHISE",
     operatorName: "Maa Tarini Urban Foods",
     locationName: "Sahid Nagar, Bhubaneswar",
@@ -161,7 +165,7 @@ export const defaultFallbackStores = [
   },
   {
     _id: "store-franchise-khandagiri",
-    name: "KisanExpress Khandagiri Fresh Point",
+    name: "KISHAN BHAIYA Khandagiri Fresh Point",
     ownershipType: "FRANCHISE",
     operatorName: "Kalinga Farmers Collective",
     locationName: "Khandagiri, Bhubaneswar",
@@ -191,7 +195,7 @@ export const defaultFallbackStores = [
   },
   {
     _id: "store-govt-cuttack",
-    name: "KisanExpress Cuttack Public Fresh Store",
+    name: "KISHAN BHAIYA Cuttack Public Fresh Store",
     ownershipType: "GOVERNMENT",
     operatorName: "Public Market Operations",
     locationName: "Badambadi, Cuttack",
@@ -221,7 +225,7 @@ export const defaultFallbackStores = [
   },
   {
     _id: "store-govt-puri",
-    name: "KisanExpress Puri Grand Road Depot",
+    name: "KISHAN BHAIYA Puri Grand Road Depot",
     ownershipType: "GOVERNMENT",
     operatorName: "Shree Jagannath Agri Kendra",
     locationName: "Grand Road, Puri",
@@ -303,7 +307,7 @@ function calculateDeliveryFee(distanceKm, subtotal) {
 export function UrbanStoresPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const user = useAppStore((state) => state.user);
+  const { user, cart, addToCart, updateCart, clearCart } = useAppStore();
   const isBusinessBuyer = user?.role === "business_buyer";
 
   const [selectedLocationName, setSelectedLocationName] = useState(
@@ -317,7 +321,6 @@ export function UrbanStoresPage() {
 
   const [selectedId, setSelectedId] = useState("");
   const [category, setCategory] = useState("All");
-  const [cart, setCart] = useState({});
   const [address, setAddress] = useState(user?.location || "Patia Market District, Bhubaneswar");
 
   const { data: apiStores = [] } = useQuery({
@@ -355,8 +358,9 @@ export function UrbanStoresPage() {
   );
 
   const lines = (selectedStore?.inventory || [])
-    .filter((item) => Number(cart[item._id]) > 0)
-    .map((item) => ({ ...item, quantity: Number(cart[item._id]) }));
+    .map((item) => ({ ...item, cartItem: cart.find((entry) => entry.storeInventoryId === item._id) }))
+    .filter((item) => Number(item.cartItem?.quantity) > 0)
+    .map((item) => ({ ...item, quantity: Number(item.cartItem.quantity) }));
 
   const subtotal = lines.reduce(
     (sum, item) => sum + Number(item.price) * item.quantity,
@@ -395,7 +399,29 @@ export function UrbanStoresPage() {
       0,
       Math.min(Number(item.stock), Number(next.toFixed(2))),
     );
-    setCart((current) => ({ ...current, [item._id]: safe < step ? 0 : safe }));
+    const existing = cart.find((entry) => entry.storeInventoryId === item._id);
+    if (safe < step) {
+      if (existing) updateCart(existing.productId, 0);
+      return;
+    }
+    if (existing) {
+      updateCart(existing.productId, safe);
+      return;
+    }
+    if (cart.some((entry) => entry.storeId !== selectedStore._id)) {
+      toast.error("Your basket contains items from another store or fulfilment channel. Clear it before switching.");
+      return;
+    }
+    addToCart({
+      ...item.product,
+      retailPrice: item.price,
+      availableQuantity: item.stock,
+      storeId: selectedStore._id,
+      storeName: selectedStore.name,
+      storeInventoryId: item._id,
+      storeDistanceKm: selectedStore.distanceKm,
+      estimatedDeliveryMinutes: selectedStore.estimatedDeliveryMinutes,
+    }, safe);
   };
 
   const checkout = useMutation({
@@ -420,9 +446,9 @@ export function UrbanStoresPage() {
     },
     onSuccess: (result) => {
       toast.success("Express order confirmed", {
-        description: `${result.urbanStore?.name || "KisanExpress Store"} linked your order to the urban delivery network.`,
+        description: `${result.urbanStore?.name || "KISHAN BHAIYA Store"} linked your order to the urban delivery network.`,
       });
-      setCart({});
+      clearCart();
       queryClient.invalidateQueries({ queryKey: ["urban-stores"] });
       queryClient.invalidateQueries({ queryKey: ["orders"] });
       queryClient.invalidateQueries({ queryKey: ["notifications"] });
@@ -548,7 +574,7 @@ export function UrbanStoresPage() {
                   type="button"
                   onClick={() => {
                     setSelectedId(urbanStore._id);
-                    setCart({});
+                    clearCart();
                   }}
                   className={`h-full w-full rounded-2xl border p-4 sm:p-5 text-left transition flex flex-col justify-between ${
                     isSelected
@@ -571,8 +597,9 @@ export function UrbanStoresPage() {
                         >
                           {ownershipLabel(urbanStore.ownershipType)}
                         </span>
-                        <span className="text-[10px] font-semibold text-gray-500">
-                          ⭐ {urbanStore.rating || "4.8"}
+                        <span className="flex items-center gap-0.5 text-[10px] font-semibold text-gray-500">
+                          <Star className="h-3 w-3 fill-amber-400 text-amber-500" />
+                          <span>{urbanStore.rating || "4.8"}</span>
                         </span>
                       </div>
                     </div>
@@ -590,18 +617,36 @@ export function UrbanStoresPage() {
                     <div className="flex items-center justify-between text-xs font-semibold text-gray-600">
                       <span className={dist !== null && dist > 20 ? "text-red-600 font-bold" : "text-[#1d5f41] font-bold"}>
                         {dist === null || dist === 0
-                          ? "🎯 Located in your area"
+                          ? "In your delivery area"
                           : `${dist} km away`}
                       </span>
-                      <span>{urbanStore.estimatedDeliveryMinutes || 25} min</span>
+                      <span className="inline-flex items-center gap-1">
+                        <Zap className="h-3 w-3 fill-amber-500 text-amber-500" />
+                        <span>{urbanStore.estimatedDeliveryMinutes || 25} min</span>
+                      </span>
                       <span>{urbanStore.availableItems || 6} items</span>
                     </div>
 
-                    {!isDeliverable && (
+                    {!isDeliverable ? (
                       <p className="mt-2 text-[11px] font-bold text-red-600 flex items-center gap-1">
                         <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                         <span>Beyond 20km delivery limit</span>
                       </p>
+                    ) : (
+                      <div className="mt-3 flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-bold text-[#1d5f41]">
+                          {isSelected ? "Selected Store" : "Select Store"}
+                        </span>
+                        <Link
+                          to={`/marketplace?storeId=${urbanStore._id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="flex items-center gap-1.5 rounded-lg bg-[#1d5f41] px-2.5 py-1 text-[11px] font-bold text-white shadow-sm hover:bg-[#14432e] transition"
+                        >
+                          <Zap className="h-3 w-3 fill-current" />
+                          <span>Shop Farm Produce</span>
+                          <ArrowRight className="h-3 w-3" />
+                        </Link>
+                      </div>
                     )}
                   </div>
                 </button>
@@ -629,28 +674,39 @@ export function UrbanStoresPage() {
                 </p>
               </div>
 
-              {/* Category Filter Pills */}
-              <div className="flex flex-wrap gap-1.5">
-                {categories.map((item) => (
-                  <button
-                    key={item}
-                    onClick={() => setCategory(item)}
-                    className={`text-xs px-3 py-1.5 rounded-lg font-semibold transition border ${
-                      category === item
-                        ? "bg-[#1d5f41] text-white border-[#1d5f41]"
-                        : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
-                    }`}
-                  >
-                    {item}
-                  </button>
-                ))}
+              {/* Quick Link to Blinkit Marketplace & Category Pills */}
+              <div className="flex flex-wrap items-center gap-2">
+                <Link
+                  to={`/marketplace?storeId=${selectedStore._id}`}
+                  className="flex items-center gap-1.5 rounded-xl bg-[#fffa43] hover:bg-yellow-300 px-3.5 py-1.5 text-xs font-black text-[#14432e] shadow-sm transition"
+                >
+                  <Zap className="h-3.5 w-3.5 fill-current" />
+                  <span>Open Farm Marketplace</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+
+                <div className="flex flex-wrap gap-1.5">
+                  {categories.map((item) => (
+                    <button
+                      key={item}
+                      onClick={() => setCategory(item)}
+                      className={`text-xs px-3 py-1.5 rounded-lg font-semibold transition border ${
+                        category === item
+                          ? "bg-[#1d5f41] text-white border-[#1d5f41]"
+                          : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
+                      }`}
+                    >
+                      {item}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
             {inventory.length ? (
               <Stagger className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {inventory.map((item) => {
-                  const quantity = Number(cart[item._id] || 0);
+                  const quantity = Number(cart.find((entry) => entry.storeInventoryId === item._id)?.quantity || 0);
                   const step = Number(
                     item.quantityStep || item.minimumQuantity || 1,
                   );

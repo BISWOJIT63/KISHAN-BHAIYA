@@ -52,7 +52,7 @@ export default function Footer() {
             </div>
           </div>
           <div className="grid grid-cols-2 gap-8 md:grid-cols-3">
-            {[...groups, ["KisanExpress", publicLinks]].map(([group, links]) => (
+            {[...groups, ["KISHAN BHAIYA", publicLinks]].map(([group, links]) => (
               <div key={group}>
                 <h3 className="text-sm font-bold">{group}</h3>
                 <ul className="mt-4 space-y-3">
@@ -63,7 +63,7 @@ export default function Footer() {
           </div>
         </div>
         <div className="mt-12 flex flex-col justify-between gap-4 border-t border-white/10 pt-6 text-xs text-forest-100/50 sm:flex-row sm:items-center">
-          <p>© 2026 KisanExpress. Development demonstration — all accounts and provider data are fictional.</p>
+          <p>© 2026 KISHAN BHAIYA. Development demonstration — all accounts and provider data are fictional.</p>
           <div className="flex items-center gap-3"><a href="#" aria-label="Facebook"><Facebook className="h-4 w-4" /></a><a href="#" aria-label="Instagram"><Instagram className="h-4 w-4" /></a><a href="#" aria-label="LinkedIn"><Linkedin className="h-4 w-4" /></a></div>
         </div>
       </div>

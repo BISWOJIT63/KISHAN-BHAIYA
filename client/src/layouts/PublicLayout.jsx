@@ -15,7 +15,7 @@ export default function PublicLayout() {
     <div className={`min-h-screen pb-20 md:pb-0 ${lowBandwidth ? 'low-bandwidth' : ''}`}>
       {!online && <OfflineBanner />}
       <Navbar />
-      <main><Outlet /></main>
+      <main id="main-content" tabIndex="-1"><Outlet /></main>
       <Footer />
       <MobileBottomNav />
       <GuidedTour />

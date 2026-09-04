@@ -2,7 +2,7 @@ const roleNavigation = {
   guest: [],
   consumer: [
     ["nav.stores", "/stores"],
-    ["nav.saved", "/saved"],
+    ["nav.marketplace", "/marketplace"],
     ["nav.orders", "/orders"],
   ],
   business_buyer: [

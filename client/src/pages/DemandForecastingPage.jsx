@@ -167,47 +167,56 @@ export function DemandForecastingPage() {
           {forecastSummary.map((item, index) => {
             const isSelected = selectedCropIndex === index;
             const isUp = item.trend === "UP";
+            const isDown = item.trend === "DOWN";
             return (
               <button
                 key={item.crop}
                 type="button"
                 onClick={() => setSelectedCropIndex(index)}
-                className={`p-4 rounded-2xl border text-left transition flex flex-col justify-between shadow-sm ${
+                aria-pressed={isSelected}
+                className={`group relative min-h-[218px] overflow-hidden rounded-xl border p-5 text-left transition duration-200 ${
                   isSelected
-                    ? "bg-white border-[#1d5f41] ring-2 ring-[#1d5f41]/30 shadow-md"
-                    : "bg-white/90 border-gray-200 hover:border-gray-300"
+                    ? "border-forest-500 bg-white shadow-lift ring-2 ring-forest-100"
+                    : "border-gray-200 bg-white shadow-sm hover:-translate-y-0.5 hover:border-forest-300 hover:shadow-lift"
                 }`}
               >
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                      {item.category}
-                    </span>
+                <span className={`absolute inset-x-0 top-0 h-1 ${isSelected ? "bg-forest-600" : "bg-gray-200 group-hover:bg-forest-300"}`} />
+                <div className="flex items-start justify-between gap-3">
+                  <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-lg ${isSelected ? "bg-forest-600 text-white" : "bg-forest-50 text-forest-700"}`}>
+                    <Leaf className="h-5 w-5" />
+                  </span>
+                  <div className="flex flex-col items-end gap-1.5">
                     <span
-                      className={`text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-1 ${
+                      className={`flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-extrabold ${
                         isUp
-                          ? "bg-green-100 text-green-800"
-                          : item.trend === "DOWN"
-                          ? "bg-red-100 text-red-800"
-                          : "bg-blue-100 text-blue-800"
+                          ? "border-green-200 bg-green-50 text-green-800"
+                          : isDown
+                            ? "border-red-200 bg-red-50 text-red-800"
+                            : "border-blue-200 bg-blue-50 text-blue-800"
                       }`}
                     >
-                      {isUp ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                      {isUp ? <TrendingUp className="h-3.5 w-3.5" /> : isDown ? <TrendingDown className="h-3.5 w-3.5" /> : <BarChart3 className="h-3.5 w-3.5" />}
                       {item.trendValue}
                     </span>
+                    {isSelected && <span className="text-[10px] font-bold uppercase tracking-wider text-forest-700">Selected</span>}
                   </div>
-
-                  <h3 className="font-bold text-sm text-gray-900 mt-2 truncate">
-                    {item.crop}
-                  </h3>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    Current: <strong>{money(item.currentPrice)}/kg</strong>
-                  </p>
                 </div>
 
-                <div className="mt-3 pt-2 border-t border-gray-100 flex items-center justify-between text-[11px]">
-                  <span className="text-gray-500">Forecast 15D:</span>
-                  <span className="font-bold text-[#1d5f41]">{money(item.projectedPrice)}/kg</span>
+                <div className="mt-4">
+                  <p className="text-[10px] font-bold uppercase tracking-[.14em] text-gray-500">{item.category}</p>
+                  <h3 className="mt-1 min-h-10 font-display text-base font-extrabold leading-5 text-gray-950">{item.crop}</h3>
+                </div>
+
+                <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-lg bg-gray-50 p-3">
+                  <div>
+                    <p className="text-[10px] font-semibold text-gray-500">Current</p>
+                    <p className="mt-0.5 font-display text-sm font-extrabold text-gray-900">{money(item.currentPrice)}<span className="text-[10px] font-medium text-gray-500">/kg</span></p>
+                  </div>
+                  <ArrowRight className="h-4 w-4 text-gray-400" />
+                  <div className="text-right">
+                    <p className="text-[10px] font-semibold text-gray-500">15-day forecast</p>
+                    <p className="mt-0.5 font-display text-sm font-extrabold text-forest-700">{money(item.projectedPrice)}<span className="text-[10px] font-medium text-gray-500">/kg</span></p>
+                  </div>
                 </div>
               </button>
             );
@@ -218,7 +227,7 @@ export function DemandForecastingPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
           
           {/* Main Chart (2-cols) */}
-          <section className="lg:col-span-2 bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+          <section className="lg:col-span-2 bg-white rounded-xl p-6 border border-gray-200 shadow-sm">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
               <div>
                 <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded border ${activeCrop.riskColor}`}>
@@ -281,7 +290,7 @@ export function DemandForecastingPage() {
           </section>
 
           {/* Demand Surge Zones Sidebar */}
-          <aside className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm flex flex-col justify-between">
+          <aside className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm flex flex-col justify-between">
             <div>
               <div className="flex items-center gap-2 mb-4">
                 <MapPin className="w-5 h-5 text-[#1d5f41]" />
@@ -295,7 +304,7 @@ export function DemandForecastingPage() {
 
               <div className="space-y-3">
                 {regionalDemandSurge.map((zone) => (
-                  <div key={zone.region} className="p-3.5 rounded-xl bg-[#fafafc] border border-gray-100 text-xs">
+                  <div key={zone.region} className="group border-l-4 border-l-forest-400 rounded-lg border border-gray-200 bg-white p-3.5 text-xs transition hover:border-forest-300 hover:shadow-sm">
                     <div className="flex items-center justify-between">
                       <p className="font-bold text-gray-900">{zone.region}</p>
                       <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">

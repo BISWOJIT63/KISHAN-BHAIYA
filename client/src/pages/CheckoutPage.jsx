@@ -29,14 +29,23 @@ export default function CheckoutPage() {
   const subtotal = cart.reduce(
       (n, i) =>
         n +
-        (i.quantity >= i.bulkThreshold ? i.bulkPrice : i.price) * i.quantity,
+        (!i.storeId && i.quantity >= i.bulkThreshold ? i.bulkPrice : i.price) * i.quantity,
       0,
     ),
     delivery = subtotal >= 799 ? 0 : 49;
+  const storeId = cart[0]?.storeId;
+  const isStoreOrder = Boolean(storeId && cart.every((item) => item.storeId === storeId && item.storeInventoryId));
   const order = useMutation({
-    mutationFn: () =>
-      getData(
-        api.post(
+    mutationFn: () => {
+      if (isStoreOrder) {
+        return getData(api.post(`/urban-stores/${storeId}/orders`, {
+          items: cart.map((item) => ({ inventoryId: item.storeInventoryId, quantity: item.quantity })),
+          paymentMethod: payment === "COD" ? "COD" : "UPI",
+          deliveryAddress: address,
+          deliveryCoordinates: user?.locationCoordinates,
+        }));
+      }
+      return getData(api.post(
           "/orders",
           {
             items: cart.map((i) => ({
@@ -48,16 +57,17 @@ export default function CheckoutPage() {
             deliverySlot: slot,
           },
           { headers: { "Idempotency-Key": idempotencyKey } },
-        ),
-      ),
+        ));
+    },
     onSuccess: (data) => {
+      const confirmedOrder = data.order || data;
       clearCart();
       toast.success(t("checkout.confirmed"), {
-        description: `${data._id} is being prepared.`,
+        description: `${confirmedOrder._id} is being prepared${data.urbanStore?.name ? ` by ${data.urbanStore.name}` : ""}.`,
       });
       // Straight to the feedback screen while the experience is fresh; it links
       // on to the order, so nobody is stranded there.
-      navigate(`/feedback/${data._id}`);
+      navigate(`/feedback/${confirmedOrder._id}`);
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -127,12 +137,15 @@ export default function CheckoutPage() {
               {t("checkout.payment")}
             </h2>
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              {[
+              {(isStoreOrder ? [
+                ["UPI", "UPI · Mock"],
+                ["COD", "Cash on delivery"],
+              ] : [
                 ["UPI", "UPI · Mock"],
                 ["CARD", "Card · Mock"],
                 ["COD", "Cash on delivery"],
                 ["WALLET", "Wallet · Mock"],
-              ].map(([value, label]) => (
+              ]).map(([value, label]) => (
                 <label
                   key={value}
                   className={`flex cursor-pointer items-center gap-3 rounded-2xl border p-4 text-sm font-bold ${payment === value ? "border-forest-600 bg-forest-50" : "border-gray-200"}`}
@@ -173,7 +186,7 @@ export default function CheckoutPage() {
                 </div>
                 <span className="text-sm font-bold">
                   {money(
-                    (i.quantity >= i.bulkThreshold ? i.bulkPrice : i.price) *
+                    (!i.storeId && i.quantity >= i.bulkThreshold ? i.bulkPrice : i.price) *
                       i.quantity,
                   )}
                 </span>

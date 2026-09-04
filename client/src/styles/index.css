@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700;800&family=Noto+Sans+Display:wght@600;700;800&display=swap");
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -24,22 +24,37 @@
 }
 
 :root {
-  color: #17221d;
-  background: #f7f6ef;
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  color: #171717;
+  background: #fafafa;
+  font-family: "Noto Sans", ui-sans-serif, system-ui, sans-serif;
   font-synthesis: none;
 }
 * {
   box-sizing: border-box;
+  -ms-overflow-style: none !important; /* IE and Edge */
+  scrollbar-width: none !important; /* Firefox */
+}
+*::-webkit-scrollbar,
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
 }
 html {
   scroll-behavior: smooth;
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
 }
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: #f7f6ef;
+  background: #fafafa;
+  line-height: 1.5;
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
 }
 button,
 a,
@@ -57,18 +72,18 @@ a:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 3px solid rgba(52, 136, 94, 0.28);
+  outline: 3px solid #22c55e;
   outline-offset: 2px;
 }
 ::selection {
-  background: #b7dcc4;
-  color: #153d2e;
+  background: #bbf7d0;
+  color: #052e16;
 }
 .leaflet-container {
   width: 100%;
   height: 100%;
-  font-family: Inter, sans-serif;
-  background: #e8eee9;
+  font-family: "Noto Sans", sans-serif;
+  background: #f0fdf4;
 }
 
 @layer components {
@@ -76,16 +91,16 @@ textarea:focus-visible {
     @apply mx-auto w-full max-w-[1400px] px-4 sm:px-6 lg:px-10;
   }
   .card {
-    @apply rounded-[20px] border border-forest-900/[.08] bg-white shadow-soft;
+    @apply rounded-xl border border-gray-300 bg-white shadow-soft;
   }
   .card-hover {
-    @apply transition duration-300 hover:-translate-y-1 hover:shadow-lift;
+    @apply transition duration-200 hover:border-forest-300 hover:shadow-lift;
   }
   .btn-primary {
-    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-forest-900 px-5 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-forest-800 active:scale-[.98] disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-forest-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-forest-700 active:scale-[.98] disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-secondary {
-    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-forest-900/15 bg-white px-5 py-2.5 text-sm font-bold text-forest-900 hover:border-forest-900/30 hover:bg-forest-50 active:scale-[.98];
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-forest-600 bg-white px-5 py-2.5 text-sm font-bold text-forest-700 hover:bg-forest-50 active:scale-[.98];
   }
   .btn-ghost {
     @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-gray-600 hover:bg-forest-50 hover:text-forest-900;
@@ -100,10 +115,10 @@ textarea:focus-visible {
     @apply font-display text-2xl font-bold tracking-[-.03em] text-ink sm:text-3xl;
   }
   .input {
-    @apply h-12 w-full rounded-xl border border-gray-200 bg-white px-4 text-sm text-ink placeholder:text-gray-400 focus:border-forest-500 focus:outline-none focus:ring-4 focus:ring-forest-100;
+    @apply h-12 w-full rounded-lg border border-gray-300 bg-white px-4 text-sm text-ink placeholder:text-gray-400 focus:border-forest-600 focus:outline-none focus:ring-4 focus:ring-forest-100;
   }
   .textarea {
-    @apply min-h-28 w-full resize-y rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-ink placeholder:text-gray-400 focus:border-forest-500 focus:outline-none focus:ring-4 focus:ring-forest-100;
+    @apply min-h-28 w-full resize-y rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm text-ink placeholder:text-gray-400 focus:border-forest-600 focus:outline-none focus:ring-4 focus:ring-forest-100;
   }
   .label {
     @apply mb-2 block text-sm font-semibold text-gray-700;
@@ -112,12 +127,21 @@ textarea:focus-visible {
     @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide;
   }
   .table-shell {
-    @apply overflow-hidden rounded-[20px] border border-gray-200 bg-white;
+    @apply overflow-hidden rounded-xl border border-gray-300 bg-white;
   }
   .skeleton {
     @apply animate-pulse rounded-xl bg-gray-200/70;
   }
 }
+
+.ux4g-utility-button {
+  @apply inline-flex min-h-8 min-w-8 items-center justify-center rounded border border-white/30 px-2 text-xs font-bold text-white hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40;
+}
+#main-content:focus { outline: none; }
+.ux4g-high-contrast body { background: #fff; color: #000; }
+.ux4g-high-contrast .card,
+.ux4g-high-contrast .table-shell { border-color: #171717; box-shadow: none; }
+.ux4g-high-contrast a { text-decoration-thickness: 2px; text-underline-offset: 3px; }
 
 .hero-grid {
   background-image:
@@ -131,17 +155,22 @@ textarea:focus-visible {
 @keyframes route-active-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(37, 109, 74, 0);
+    box-shadow: 0 0 0 0 rgba(22, 163, 74, 0);
   }
   50% {
-    box-shadow: 0 0 0 6px rgba(37, 109, 74, 0.12);
+    box-shadow: 0 0 0 6px rgba(22, 163, 74, 0.12);
   }
 }
-.hide-scrollbar::-webkit-scrollbar {
-  display: none;
+.hide-scrollbar::-webkit-scrollbar,
+.scrollbar-none::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
-.hide-scrollbar {
-  scrollbar-width: none;
+.hide-scrollbar,
+.scrollbar-none {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
 }
 .public-service-strip {
   background: linear-gradient(
@@ -157,10 +186,10 @@ textarea:focus-visible {
 }
 .govt-hero {
   min-height: 590px;
-  border: 1px solid rgba(13, 61, 43, 0.18);
-  border-radius: 18px;
-  background: #082a1f;
-  box-shadow: 0 22px 48px rgba(20, 53, 38, 0.16);
+  border: 1px solid rgba(22, 101, 52, 0.24);
+  border-radius: 12px;
+  background: #14532d;
+  box-shadow: 0 16px 36px rgba(5, 46, 22, 0.16);
 }
 .govt-hero::before {
   content: "";
@@ -210,7 +239,7 @@ textarea:focus-visible {
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.96);
   padding: 22px;
-  color: #17221d;
+  color: #171717;
   box-shadow: 0 18px 38px rgba(0, 0, 0, 0.21);
 }
 .govt-section-heading {
@@ -237,8 +266,8 @@ textarea:focus-visible {
   position: relative;
   min-height: 248px;
   overflow: hidden;
-  border: 1px solid #dbe4da;
-  border-radius: 16px;
+  border: 1px solid #d9d9d9;
+  border-radius: 12px;
   background: #fff;
   padding: 22px;
   box-shadow: 0 6px 18px rgba(28, 57, 39, 0.06);
@@ -267,12 +296,12 @@ textarea:focus-visible {
   align-items: center;
   gap: 7px;
   margin-top: 20px;
-  color: #17613c;
+  color: #15803d;
   font-size: 14px;
   font-weight: 800;
 }
 .govt-service-link:hover {
-  color: #0b4128;
+  color: #166534;
   text-decoration: underline;
   text-underline-offset: 3px;
 }

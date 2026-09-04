@@ -3,7 +3,11 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
 import { store } from "../services/dataStore.js";
-import { scoreCandidates, buildFulfillmentPlan } from "../services/matching.js";
+import {
+  scoreCandidates,
+  buildFulfillmentPlan,
+  distanceKm,
+} from "../services/matching.js";
 import {
   fetchMandiBenchmarks,
   priceRecommendation,
@@ -689,9 +693,18 @@ router.patch(
     const seller = (await store.list("sellers")).find(
       (item) => item.userId === req.user.sub,
     );
-    if (seller && req.body.location)
+    if (
+      seller &&
+      (req.body.location !== undefined ||
+        req.body.locationCoordinates !== undefined)
+    )
       await store.update("sellers", seller._id || seller.id, {
-        location: req.body.location,
+        ...(req.body.location !== undefined
+          ? { location: req.body.location }
+          : {}),
+        ...(req.body.locationCoordinates !== undefined
+          ? { coordinates: req.body.locationCoordinates }
+          : {}),
       });
     await store.create(
       "auditLogs",
@@ -1364,7 +1377,7 @@ router.get(
         source:
           mandi?.source ||
           latest.source ||
-          "KisanExpress seeded reference provider",
+          "KISHAN BHAIYA seeded reference provider",
         timestamp: mandi?.timestamp || latest.date || new Date().toISOString(),
         indicative: true,
         mandiRecords: mandi?.records || 0,
@@ -2315,31 +2328,98 @@ router.get(
   "/fpos",
   requireAuth,
   allowRoles("farmer"),
-  asyncHandler(async (_req, res) => {
-    const fpos = (await store.list("sellers"))
-      .filter((seller) => seller.type === "FPO" && seller.userId)
-      .map(
-        ({
-          id: fpoId,
-          name,
-          location,
-          rating,
-          reviews,
-          reliability,
-          completedOrders,
-          image,
-        }) => ({
-          fpoId,
-          name,
-          location,
-          rating,
-          reviews,
-          reliability,
-          completedOrders,
-          image,
-        }),
-      );
-    ok(res, fpos);
+  asyncHandler(async (req, res) => {
+    const latitudeProvided = req.query.latitude !== undefined;
+    const longitudeProvided = req.query.longitude !== undefined;
+    if (latitudeProvided !== longitudeProvided)
+      throw new HttpError(400, "Latitude and longitude must be provided together");
+
+    let originCoordinates = null;
+    let originLabel = null;
+    let originSource = null;
+    if (latitudeProvided) {
+      const latitude = Number(req.query.latitude);
+      const longitude = Number(req.query.longitude);
+      if (
+        !Number.isFinite(latitude) ||
+        !Number.isFinite(longitude) ||
+        latitude < 6 ||
+        latitude > 37.7 ||
+        longitude < 68 ||
+        longitude > 97.5
+      )
+        throw new HttpError(400, "Choose a valid location inside India");
+      originCoordinates = [longitude, latitude];
+      originLabel = "Current device location";
+      originSource = "DEVICE";
+    }
+
+    const [sellers, users] = await Promise.all([
+      store.list("sellers"),
+      store.list("users"),
+    ]);
+    if (!originCoordinates) {
+      const farmer = users.find((user) => user._id === req.user.sub);
+      const farmProfile = sellerForUser(sellers, req.user.sub);
+      originCoordinates =
+        farmer?.locationCoordinates || farmProfile?.coordinates || null;
+      originLabel = farmProfile?.location || farmer?.location || null;
+      originSource = originCoordinates ? "SAVED_FARM" : null;
+    }
+
+    const usersById = new Map(users.map((user) => [user._id, user]));
+    const fpos = sellers
+      .filter((seller) => {
+        const manager = usersById.get(seller.userId);
+        return (
+          seller.type === "FPO" &&
+          manager?.role === "fpo_manager" &&
+          accountStatusOf(manager) === "ACTIVE"
+        );
+      })
+      .map((seller) => {
+        const manager = usersById.get(seller.userId);
+        const managerIsActive =
+          manager?.role === "fpo_manager" && accountStatusOf(manager) === "ACTIVE";
+        const distance =
+          originCoordinates && Array.isArray(seller.coordinates)
+            ? Number(distanceKm(originCoordinates, seller.coordinates).toFixed(1))
+            : null;
+        return {
+          fpoId: seller.id || seller._id,
+          name: seller.name,
+          location: seller.location,
+          address: seller.address || seller.location,
+          coordinates: seller.coordinates,
+          contactName: seller.contactName || "FPO office",
+          phone: seller.contactPhone || null,
+          email: seller.contactEmail || null,
+          officeHours: seller.officeHours || "Contact the FPO office for timings",
+          memberCount: seller.memberCount || null,
+          crops: seller.crops || [],
+          rating: seller.rating,
+          reviews: seller.reviews,
+          reliability: seller.reliability,
+          completedOrders: seller.completedOrders,
+          image: seller.image,
+          acceptingMembers: Boolean(seller.userId && managerIsActive),
+          distanceKm: distance,
+        };
+      })
+      .sort((first, second) => {
+        if (first.distanceKm === null && second.distanceKm === null)
+          return first.name.localeCompare(second.name);
+        if (first.distanceKm === null) return 1;
+        if (second.distanceKm === null) return -1;
+        return first.distanceKm - second.distanceKm;
+      });
+    ok(res, fpos, {
+      origin: {
+        label: originLabel,
+        source: originSource,
+        coordinates: originCoordinates,
+      },
+    });
   }),
 );
 router.get(

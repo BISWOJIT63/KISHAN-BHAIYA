@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, Navigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   motion as Motion,
@@ -44,7 +44,6 @@ import {
   MapPin,
 } from "lucide-react";
 import { api, getData } from "../api/client.js";
-import ProductCard from "../components/ProductCard.jsx";
 import { LoadingState } from "../components/UI.jsx";
 import { useAppStore } from "../store/useAppStore.js";
 import { PageMotion, Stagger, StaggerItem } from "../components/Motion.jsx";
@@ -92,6 +91,12 @@ function AnimatedCounter({
 export default function HomePage() {
   const navigate = useNavigate();
   const user = useAppStore((state) => state.user);
+
+  // Individual buyers (consumers) cannot access landing / - they always start at Urban Stores
+  if (user?.role === "consumer") {
+    return <Navigate to="/stores" replace />;
+  }
+
   const retailShoppingVisible = user?.role !== "business_buyer";
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -158,15 +163,6 @@ export default function HomePage() {
         : "";
     navigate(`/marketplace?q=${encodeURIComponent(searchQuery)}${catQuery}`);
   };
-
-  const { data: featuredProducts = [], isLoading } = useQuery({
-    queryKey: ["products", "featured"],
-    queryFn: () =>
-      getData(api.get("/products")).then((items) =>
-        items.filter((item) => item.featured).slice(0, 6),
-      ),
-    enabled: retailShoppingVisible,
-  });
 
   const categories = [
     {
@@ -458,11 +454,11 @@ export default function HomePage() {
 
   return (
     <PageMotion>
-      <div className="bg-[#f2f2f8] text-[#17221d] font-sans">
+      <div className="bg-[#fafafa] text-[#171717] font-sans">
         {/* ══════════════════════════════════════════════════════════
             1. LIVE URGENT NOTIFICATIONS & CYCLONE TICKER
         ══════════════════════════════════════════════════════════ */}
-        <div className="bg-[#14432e] text-white border-b border-[#256d4a]">
+        <div className="bg-forest-950 text-white border-b border-forest-800">
           <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2 sm:py-2.5 flex flex-col md:flex-row items-center justify-between gap-2 text-xs">
             <div className="flex items-center gap-2.5 w-full md:w-auto overflow-hidden">
               <div className="flex items-center gap-1 shrink-0 bg-red-600/90 text-white font-bold text-[10px] uppercase px-2 py-0.5 rounded tracking-wider animate-pulse">
@@ -480,7 +476,7 @@ export default function HomePage() {
                     transition={{ duration: 0.3 }}
                     className="flex items-center gap-1.5 text-xs truncate"
                   >
-                    <span className="font-bold text-[#fffa43] shrink-0 hidden sm:inline text-[11px]">
+                    <span className="font-bold text-lime-300 shrink-0 hidden sm:inline text-[11px]">
                       [{currentAlert.type}]:
                     </span>
                     <span className="truncate text-white/95 text-[11px] sm:text-xs font-medium">
@@ -499,7 +495,7 @@ export default function HomePage() {
                     onClick={() => setActiveAlertIndex(i)}
                     className={`h-1.5 rounded-full transition-all ${
                       activeAlertIndex === i
-                        ? "bg-[#fffa43] w-3.5"
+                        ? "bg-lime-300 w-3.5"
                         : "bg-white/40 w-1.5 hover:bg-white/70"
                     }`}
                     aria-label={`Show alert ${i + 1}`}
@@ -518,26 +514,27 @@ export default function HomePage() {
         </div>
 
         {/* ══════════════════════════════════════════════════════════
-            2. PORTAL HERO HEADER WITH UNSPLASH FARM LANDSCAPE
+            2. PORTAL HERO HEADER WITH VISIBLE UNSPLASH FARM LANDSCAPE
         ══════════════════════════════════════════════════════════ */}
-        <section className="relative text-white pt-8 sm:pt-12 pb-16 sm:pb-20 px-3.5 sm:px-6 overflow-hidden">
+        <section className="relative text-white pt-10 sm:pt-14 pb-16 sm:pb-20 px-3.5 sm:px-6 overflow-hidden">
           <img
             src="https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=1600&q=80"
             alt="Agricultural landscape of India"
             className="absolute inset-0 w-full h-full object-cover object-center"
           />
-          <div className="absolute inset-0 bg-gradient-to-b from-[#14432e]/95 via-[#1d5f41]/90 to-[#14432e]/95" />
+          {/* Reduced gradient color overlay to make farm landscape image clearly visible */}
+          <div className="absolute inset-0 bg-gradient-to-b from-forest-950/50 via-forest-900/30 to-forest-950/65" />
 
           <div className="max-w-4xl mx-auto text-center relative z-10">
-            <div className="inline-flex items-center gap-1.5 bg-[#01512c]/90 text-white text-[11px] font-semibold px-3.5 py-1 rounded-full border border-white/20 mb-3 shadow-sm">
-              <Building2 className="w-3.5 h-3.5 text-[#fffa43]" />
+            <div className="inline-flex items-center gap-1.5 bg-forest-900/80 text-white text-[11px] font-semibold px-3.5 py-1 rounded-full border border-white/20 mb-3 shadow-md backdrop-blur-sm">
+              <Building2 className="w-3.5 h-3.5 text-lime-300" />
               <span>National Farm-to-Market Unified Portal</span>
             </div>
 
-            <h1 className="text-2xl sm:text-4xl lg:text-5xl font-bold tracking-tight text-white leading-tight">
+            <h1 className="text-2xl sm:text-4xl lg:text-5xl font-bold tracking-tight text-white leading-tight drop-shadow-md">
               Empowering India’s Farmers, FPOs &amp; Buyers
             </h1>
-            <p className="mt-2.5 text-xs sm:text-sm text-white/90 max-w-xl mx-auto">
+            <p className="mt-2.5 text-xs sm:text-sm text-white/95 max-w-xl mx-auto drop-shadow font-medium">
               Real-time produce marketplace, verified lot quality passports,
               live cyclone advisories, and smart rural cold-chain transport.
             </p>
@@ -576,7 +573,7 @@ export default function HomePage() {
 
               <button
                 type="submit"
-                className="w-full sm:w-auto bg-[#1d5f41] hover:bg-[#164b33] text-white font-semibold text-xs px-5 py-2 rounded-lg transition shadow flex items-center justify-center gap-1.5"
+                className="w-full sm:w-auto bg-forest-600 hover:bg-forest-700 text-white font-semibold text-xs px-5 py-2 rounded-lg transition shadow flex items-center justify-center gap-1.5"
               >
                 <span>Search</span>
                 <ArrowRight className="w-3.5 h-3.5" />
@@ -1060,59 +1057,6 @@ export default function HomePage() {
                 );
               })}
             </div>
-          </section>
-        )}
-
-        {/* ══════════════════════════════════════════════════════════
-            8. FEATURED ACTIVE LOTS (Fulfilled via Urban Stores)
-        ══════════════════════════════════════════════════════════ */}
-        {retailShoppingVisible && (
-          <section className="max-w-6xl mx-auto px-3.5 sm:px-6 pb-14">
-            <div className="flex items-center justify-between mb-5">
-              <div>
-                <h2 className="text-lg sm:text-2xl font-bold text-gray-900">
-                  Fresh Harvests at Nearby Urban Stores
-                </h2>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  Fulfilled through local government &amp; franchise depots
-                  within a 20 km radius.
-                </p>
-              </div>
-              <Link
-                to="/stores"
-                className="text-xs font-semibold text-[#1d5f41] hover:underline flex items-center gap-1"
-              >
-                <span>View Urban Stores</span>{" "}
-                <ChevronRight className="w-3 h-3" />
-              </Link>
-            </div>
-
-            {isLoading ? (
-              <LoadingState />
-            ) : (
-              <>
-                <div className="block sm:hidden">
-                  <Swiper
-                    modules={[FreeMode]}
-                    spaceBetween={12}
-                    slidesPerView={1.2}
-                    freeMode={true}
-                  >
-                    {featuredProducts.map((product) => (
-                      <SwiperSlide key={product._id} className="h-auto">
-                        <ProductCard product={product} />
-                      </SwiperSlide>
-                    ))}
-                  </Swiper>
-                </div>
-
-                <div className="hidden sm:grid grid-cols-2 lg:grid-cols-4 gap-4">
-                  {featuredProducts.map((product) => (
-                    <ProductCard key={product._id} product={product} />
-                  ))}
-                </div>
-              </>
-            )}
           </section>
         )}
       </div>

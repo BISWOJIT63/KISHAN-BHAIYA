@@ -38,7 +38,8 @@ export function IndicLanguageIcon({ className = "h-5 w-5" }) {
 }
 
 /**
- * `variant="header"` is the compact control in the navbar (md and up).
+ * `variant="utility"` is the compact control in the top accessibility bar.
+ * `variant="header"` is the light compact control for other headers.
  * `variant="segmented"` shows all languages as big tap targets inside the mobile menu.
  */
 export default function LanguageSwitcher({
@@ -53,6 +54,30 @@ export default function LanguageSwitcher({
     setLanguage(next);
     i18n.changeLanguage(next);
   };
+
+  if (variant === "utility") {
+    return (
+      <label
+        data-tour="language"
+        className={cx("relative flex items-center", className)}
+        title={t("language.label")}
+      >
+        <IndicLanguageIcon className="pointer-events-none absolute left-2 h-4 w-4 text-white" />
+        <select
+          className="h-8 max-w-[88px] cursor-pointer appearance-none rounded border border-white/30 bg-forest-950 pl-7 pr-2 text-[11px] font-bold text-white hover:bg-white/15 focus:outline-none"
+          value={current}
+          onChange={(event) => changeLanguage(event.target.value)}
+          aria-label={t("language.label")}
+        >
+          {languages.map((entry) => (
+            <option key={entry.code} value={entry.code} className="bg-white text-gray-900">
+              {entry.short}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  }
 
   if (variant === "segmented") {
     return (

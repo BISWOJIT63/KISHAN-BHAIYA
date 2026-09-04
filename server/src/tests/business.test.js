@@ -229,30 +229,24 @@ describe("critical API path", () => {
     expect(outside.status).toBe(400);
   });
   it("logs in with a documented development account", async () => {
-    const response = await request(app)
-      .post("/api/v1/auth/login")
-      .send({
-        identifier: "consumer@kishanbhaiya.demo",
-        password: demoPassword,
-      });
+    const response = await request(app).post("/api/v1/auth/login").send({
+      identifier: "consumer@kishanbhaiya.demo",
+      password: demoPassword,
+    });
     expect(response.status).toBe(200);
     expect(response.body.data.user.role).toBe("consumer");
     token = response.body.data.accessToken;
   });
   it("provides an active fleet-partner demo account", async () => {
     const [driverLogin, fleetLogin] = await Promise.all([
-      request(app)
-        .post("/api/v1/auth/login")
-        .send({
-          identifier: "driver.active@kishanbhaiya.demo",
-          password: demoPassword,
-        }),
-      request(app)
-        .post("/api/v1/auth/login")
-        .send({
-          identifier: "fleet@kishanbhaiya.demo",
-          password: demoPassword,
-        }),
+      request(app).post("/api/v1/auth/login").send({
+        identifier: "driver.active@kishanbhaiya.demo",
+        password: demoPassword,
+      }),
+      request(app).post("/api/v1/auth/login").send({
+        identifier: "fleet@kishanbhaiya.demo",
+        password: demoPassword,
+      }),
     ]);
     expect(driverLogin.status).toBe(200);
     expect(driverLogin.body.data.user).toEqual(
@@ -389,12 +383,10 @@ describe("critical API path", () => {
     const farmerLogin = await request(app)
       .post("/api/v1/auth/login")
       .send({ identifier: "farmer@kishanbhaiya.demo", password: demoPassword });
-    const logisticsLogin = await request(app)
-      .post("/api/v1/auth/login")
-      .send({
-        identifier: "logistics@kishanbhaiya.demo",
-        password: demoPassword,
-      });
+    const logisticsLogin = await request(app).post("/api/v1/auth/login").send({
+      identifier: "logistics@kishanbhaiya.demo",
+      password: demoPassword,
+    });
     const fpoLogin = await request(app)
       .post("/api/v1/auth/login")
       .send({ identifier: "fpo@kishanbhaiya.demo", password: demoPassword });
@@ -469,6 +461,64 @@ describe("critical API path", () => {
       buyerOrder.status,
       buyerStoreOrder.status,
     ]).toEqual([403, 403, 403, 403, 403, 403]);
+  });
+  it("creates, pauses, resumes and runs a recurring bulk procurement plan", async () => {
+    const created = await request(app)
+      .post("/api/v1/recurring-requirements")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({
+        product: "Green Chilli",
+        category: "Spices",
+        quantity: 600,
+        unit: "kg",
+        frequency: "WEEKLY",
+        weekdays: ["Wednesday"],
+        grade: "A",
+        priceBand: [52, 60],
+        location: "Bhubaneswar",
+        packaging: "10kg crates",
+        transport: "Either",
+        allowPartial: true,
+        minFillPercent: 80,
+        leadTimeDays: 5,
+      });
+    expect(created.status).toBe(201);
+    expect(created.body.data).toEqual(
+      expect.objectContaining({
+        buyerId: "user-business",
+        status: "ACTIVE",
+        generatedCount: 0,
+        nextRun: expect.any(String),
+      }),
+    );
+    const planId = created.body.data._id;
+    const paused = await request(app)
+      .patch(`/api/v1/recurring-requirements/${planId}`)
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ status: "PAUSED" });
+    expect(paused.body.data.status).toBe("PAUSED");
+    const blockedRun = await request(app)
+      .post(`/api/v1/recurring-requirements/${planId}/run`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+    expect(blockedRun.status).toBe(409);
+    const resumed = await request(app)
+      .patch(`/api/v1/recurring-requirements/${planId}`)
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ status: "ACTIVE" });
+    expect(resumed.body.data.status).toBe("ACTIVE");
+    const run = await request(app)
+      .post(`/api/v1/recurring-requirements/${planId}/run`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+    expect(run.status).toBe(200);
+    expect(run.body.data.requirement).toEqual(
+      expect.objectContaining({
+        buyerId: "user-business",
+        recurring: true,
+        recurringPlanId: planId,
+        status: "OPEN",
+      }),
+    );
+    expect(run.body.data.plan.generatedCount).toBe(1);
   });
   it("separates buyer, producer and logistics data and actions", async () => {
     const [
@@ -808,12 +858,10 @@ describe("critical API path", () => {
     expect(duplicate.status).toBe(409);
   });
   it("restricts pending applicants and lets an admin approve them with an audit trail", async () => {
-    const pendingLogin = await request(app)
-      .post("/api/v1/auth/login")
-      .send({
-        identifier: "pending.farmer@kishanbhaiya.demo",
-        password: demoPassword,
-      });
+    const pendingLogin = await request(app).post("/api/v1/auth/login").send({
+      identifier: "pending.farmer@kishanbhaiya.demo",
+      password: demoPassword,
+    });
     expect(pendingLogin.status).toBe(200);
     expect(pendingLogin.body.data.user.accountStatus).toBe(
       "PENDING_ADMIN_APPROVAL",
@@ -878,12 +926,10 @@ describe("critical API path", () => {
     ).toBe(true);
   });
   it("supports secure document metadata and a request-changes resubmission", async () => {
-    const applicantLogin = await request(app)
-      .post("/api/v1/auth/login")
-      .send({
-        identifier: "pending.fpo@kishanbhaiya.demo",
-        password: demoPassword,
-      });
+    const applicantLogin = await request(app).post("/api/v1/auth/login").send({
+      identifier: "pending.fpo@kishanbhaiya.demo",
+      password: demoPassword,
+    });
     const applicantToken = applicantLogin.body.data.accessToken;
     const center = await request(app)
       .get("/api/v1/auth/verification")
@@ -920,18 +966,16 @@ describe("critical API path", () => {
     ).catch(() => {});
   });
   it("does not persist a plaintext password during registration", async () => {
-    const registered = await request(app)
-      .post("/api/v1/auth/register")
-      .send({
-        name: "Fictional Buyer",
-        email: "new.business@kishanbhaiya.demo",
-        phone: "9876501099",
-        password: "StrongPass@2026",
-        role: "business_buyer",
-        organization: "Demo Procurement Co",
-        location: "Puri",
-        preferredLanguage: "en",
-      });
+    const registered = await request(app).post("/api/v1/auth/register").send({
+      name: "Fictional Buyer",
+      email: "new.business@kishanbhaiya.demo",
+      phone: "9876501099",
+      password: "StrongPass@2026",
+      role: "business_buyer",
+      organization: "Demo Procurement Co",
+      location: "Puri",
+      preferredLanguage: "en",
+    });
     expect(registered.status).toBe(200);
     expect(registered.body.data.user.accountStatus).toBe(
       "PENDING_ADMIN_APPROVAL",

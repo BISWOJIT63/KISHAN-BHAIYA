@@ -34,7 +34,7 @@ const documentOptions = {
 const statusContent = {
   PENDING_ADMIN_APPROVAL: {
     title: "Your application is under review",
-    description: "Kishan Bhaiya verification staff will review your profile and submitted documents. Operational tools remain locked until approval.",
+    description: "KISHAN BHAIYA verification staff will review your profile and submitted documents. Operational tools remain locked until approval.",
     tone: "border-amber-200 bg-amber-50 text-amber-900",
     icon: Clock3,
   },
@@ -195,7 +195,7 @@ export function VerificationAdminPage() {
   });
   return (
     <div className="container-page py-10">
-      <PageHeader eyebrow="Kishan Bhaiya Admin" title="Verification queue" description="Review applicants, document metadata and prior decisions. Every high-impact action creates an immutable audit record." actions={<Link className="btn-secondary" to="/admin">Dispute center</Link>} />
+      <PageHeader eyebrow="KISHAN BHAIYA Admin" title="Verification queue" description="Review applicants, document metadata and prior decisions. Every high-impact action creates an immutable audit record." actions={<Link className="btn-secondary" to="/admin">Dispute center</Link>} />
       <div className="mb-6 grid gap-3 rounded-2xl border bg-white p-4 sm:grid-cols-2">
         <label><span className="label">Status</span><select className="input" value={status} onChange={(event) => setStatus(event.target.value)}><option value="">All statuses</option>{["PENDING_ADMIN_APPROVAL", "CHANGES_REQUESTED", "APPROVED", "REJECTED", "SUSPENDED"].map((item) => <option key={item}>{item}</option>)}</select></label>
         <label><span className="label">Role</span><select className="input" value={role} onChange={(event) => setRole(event.target.value)}><option value="">All roles</option>{["business_buyer", "farmer", "fpo_manager", "logistics_partner"].map((item) => <option key={item}>{item}</option>)}</select></label>

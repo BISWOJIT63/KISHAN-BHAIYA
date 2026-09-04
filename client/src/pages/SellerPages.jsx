@@ -737,7 +737,7 @@ export function ProductFormPage() {
           <div className="rounded-2xl bg-amber-50 p-5 text-xs leading-5 text-amber-800">
             <strong className="block">Before publishing</strong>Review
             voice-captured values, grade claims, available quantity, shelf life
-            and price. Kishan Bhaiya never publishes uncertain voice input
+            and price. KISHAN BHAIYA never publishes uncertain voice input
             automatically.
           </div>
         </aside>

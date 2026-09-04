@@ -7,13 +7,25 @@ export default {
       // so we need a breakpoint below Tailwind's 640px `sm`.
       screens: { xs: '400px' },
       colors: {
-        forest: { 50: '#eff7f2', 100: '#daede0', 200: '#b7dcc4', 300: '#88c3a0', 400: '#55a578', 500: '#34885e', 600: '#256d4a', 700: '#1e573c', 800: '#194632', 900: '#153d2e', 950: '#0a2119' },
-        cream: '#f7f6ef',
-        ink: '#17221d',
-        harvest: '#e7a52e'
+        forest: {
+          50: '#f0fdf4',
+          100: '#dcfce7',
+          200: '#bbf7d0',
+          300: '#86efac',
+          400: '#4ade80',
+          500: '#22c55e',
+          600: '#16a34a',
+          700: '#15803d',
+          800: '#166534',
+          900: '#14532d',
+          950: '#052e16'
+        },
+        cream: '#fafafa',
+        ink: '#171717',
+        harvest: '#fa8c16'
       },
-      fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'], display: ['Manrope', 'Inter', 'sans-serif'] },
-      boxShadow: { soft: '0 14px 36px rgba(21,61,46,.08)', lift: '0 20px 50px rgba(21,61,46,.13)' },
+      fontFamily: { sans: ['Noto Sans', 'Noto Sans Devanagari', 'Segoe UI', 'sans-serif'], display: ['Noto Sans Display', 'Noto Sans', 'sans-serif'] },
+      boxShadow: { soft: '0 2px 8px rgba(23,23,23,.07)', lift: '0 10px 28px rgba(36,20,92,.14)' },
       borderRadius: { '4xl': '2rem' }
     }
   },

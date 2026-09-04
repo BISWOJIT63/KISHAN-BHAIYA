@@ -24,11 +24,11 @@ import {
 } from "../utils/navigation.js";
 import { navIconFor } from "../utils/navIcons.js";
 import Logo from "./Logo.jsx";
-import LanguageSwitcher from "./LanguageSwitcher.jsx";
 import NotificationBell from "./NotificationBell.jsx";
 import SmartImage from "./SmartImage.jsx";
 import { EmptyState } from "./UI.jsx";
 import UserAvatar from "./UserAvatar.jsx";
+import AccessibilityToolbar from "./AccessibilityToolbar.jsx";
 export default function Navbar() {
   const navigate = useNavigate(),
     { t } = useTranslation(),
@@ -63,11 +63,19 @@ export default function Navbar() {
   };
   return (
     <>
-      <header className="sticky top-0 z-50 border-b border-forest-900/10 bg-cream/95 backdrop-blur-xl">
-        <div className="public-service-strip">
-          <div className="container-page flex h-8 items-center justify-between gap-3 text-[11px] font-semibold">
-            <span>Public-service style agriculture portal</span>
-            <span className="hidden sm:inline">Role-based services · Accessible language choices</span>
+      <header className="sticky top-0 z-50 border-b border-gray-200 bg-white/95 backdrop-blur-xl">
+        <div className="bg-forest-950 text-white">
+          <div className="container-page flex min-h-9 items-center justify-between gap-3 py-1 text-[11px] font-semibold">
+            <div className="flex items-center gap-3">
+              <span className="inline-flex items-center gap-1.5">
+                <span aria-hidden="true">🇮🇳</span>
+                <span className="hidden md:inline">Digital agriculture service portal</span>
+              </span>
+              <a href="#main-content" className="hidden underline underline-offset-4 hover:text-forest-200 sm:inline">
+                Skip to main content
+              </a>
+            </div>
+            <AccessibilityToolbar />
           </div>
         </div>
         {/* Tight gaps + a shrinkable logo keep this single row inside a 320px
@@ -115,7 +123,6 @@ export default function Navbar() {
                 </span>
               )}
             </button>}
-            <LanguageSwitcher variant="header" className="hidden md:flex" />
             {user && <NotificationBell />}
             {shoppingEnabled && <button
               data-tour="cart"
@@ -218,14 +225,6 @@ export default function Navbar() {
         {mobileMenu && (
           <div className="max-h-[calc(100vh-72px)] overflow-y-auto border-t border-gray-200 bg-white px-4 py-4 lg:hidden">
             <nav className="container-page grid gap-1 px-0">
-              {/* Language first: it is the one control that unlocks every other
-                  label on the page for a non-English reader. */}
-              <div className="mb-2 md:hidden">
-                <p className="mb-1.5 px-1 text-xs font-bold uppercase tracking-[.14em] text-gray-500">
-                  {t("language.label")}
-                </p>
-                <LanguageSwitcher variant="segmented" />
-              </div>
               {nav.map(([label, to]) => {
                 const [Icon, iconColor, iconBg] = navIconFor(label);
                 return (
@@ -245,6 +244,21 @@ export default function Navbar() {
                   </Link>
                 );
               })}
+              {shoppingEnabled && (
+                <Link
+                  to="/saved"
+                  className="flex items-center gap-3 rounded-xl px-3 py-3 text-base font-semibold text-gray-700 hover:bg-forest-50"
+                  onClick={() => setMobileMenu(false)}
+                >
+                  <span
+                    aria-hidden="true"
+                    className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-rose-100"
+                  >
+                    <Heart className="h-5 w-5 text-rose-600" />
+                  </span>
+                  {t("nav.saved")}
+                </Link>
+              )}
               {user && (
                 <Link
                   to="/notifications"
@@ -355,7 +369,7 @@ export default function Navbar() {
                       <div className="mt-3 flex items-center justify-between">
                         <span className="text-sm font-bold text-forest-800">
                           {money(
-                            (item.quantity >= item.bulkThreshold
+                            (!item.storeId && item.quantity >= item.bulkThreshold
                               ? item.bulkPrice
                               : item.price) * item.quantity,
                           )}
@@ -414,7 +428,7 @@ export default function Navbar() {
                       cart.reduce(
                         (n, i) =>
                           n +
-                          (i.quantity >= i.bulkThreshold
+                          (!i.storeId && i.quantity >= i.bulkThreshold
                             ? i.bulkPrice
                             : i.price) *
                             i.quantity,

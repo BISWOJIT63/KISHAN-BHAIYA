@@ -1,6 +1,6 @@
-# KisanExpress
+# KISHAN BHAIYA
 
-KisanExpress is a production-oriented MERN agriculture marketplace and smart-logistics platform. It combines a warm direct-to-consumer marketplace with structured B2B procurement, farmer/FPO workspaces, lot traceability, pre-harvest demand, surplus rescue, multi-seller fulfilment and consolidated logistics.
+KISHAN BHAIYA is a production-oriented MERN agriculture marketplace and smart-logistics platform. It combines a direct-to-consumer marketplace with structured B2B procurement, farmer/FPO workspaces, lot traceability, pre-harvest demand, surplus rescue, multi-seller fulfilment and consolidated logistics.
 
 The repository is a modular monolith: MongoDB is the system of record, Express owns business rules, Socket.IO delivers real-time enhancements, and React consumes the same REST APIs in every role-specific experience.
 

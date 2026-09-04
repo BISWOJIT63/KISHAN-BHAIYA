@@ -64,8 +64,7 @@ const formForPlan = (plan) => ({
 function PlanForm({ value, onChange }) {
   const field = (name) => ({
     value: value[name],
-    onChange: (event) =>
-      onChange({ ...value, [name]: event.target.value }),
+    onChange: (event) => onChange({ ...value, [name]: event.target.value }),
   });
   const toggleDay = (day) => {
     const selected = value.weekdays.includes(day);
@@ -283,7 +282,9 @@ export default function RecurringProcurementPage() {
           : api.post("/recurring-requirements", payload),
       ),
     onSuccess: () => {
-      toast.success(editingId ? "Recurring plan updated" : "Recurring plan created");
+      toast.success(
+        editingId ? "Recurring plan updated" : "Recurring plan created",
+      );
       setDialogOpen(false);
       refresh();
     },
@@ -306,8 +307,7 @@ export default function RecurringProcurementPage() {
     onError: (error) => toast.error(apiError(error)),
   });
   const runNow = useMutation({
-    mutationFn: (id) =>
-      getData(api.post(`/recurring-requirements/${id}/run`)),
+    mutationFn: (id) => getData(api.post(`/recurring-requirements/${id}/run`)),
     onSuccess: (result) => {
       toast.success("Bulk requirement generated", {
         description: `${result.requirement.product} is now open for quotations.`,
@@ -350,7 +350,9 @@ export default function RecurringProcurementPage() {
       (form.minimumPrice && !form.maximumPrice) ||
       (!form.minimumPrice && form.maximumPrice)
     ) {
-      toast.error("Provide both minimum and maximum price, or leave both empty");
+      toast.error(
+        "Provide both minimum and maximum price, or leave both empty",
+      );
       return;
     }
     const payload = {
@@ -391,8 +393,17 @@ export default function RecurringProcurementPage() {
       />
 
       <div className="mb-7 grid gap-4 sm:grid-cols-3">
-        <MetricCard label="Active plans" value={metrics.active} icon={RefreshCcw} />
-        <MetricCard label="Paused plans" value={metrics.paused} icon={Pause} tone="amber" />
+        <MetricCard
+          label="Active plans"
+          value={metrics.active}
+          icon={RefreshCcw}
+        />
+        <MetricCard
+          label="Paused plans"
+          value={metrics.paused}
+          icon={Pause}
+          tone="amber"
+        />
         <MetricCard
           label="Requirements generated"
           value={metrics.generated}
@@ -411,7 +422,9 @@ export default function RecurringProcurementPage() {
                 <StatusBadge status={plan.status} />
                 <button
                   className="btn-ghost h-10 w-10 p-0"
-                  aria-label={plan.status === "ACTIVE" ? "Pause plan" : "Resume plan"}
+                  aria-label={
+                    plan.status === "ACTIVE" ? "Pause plan" : "Resume plan"
+                  }
                   disabled={changeStatus.isPending}
                   onClick={() =>
                     changeStatus.mutate({
@@ -427,7 +440,9 @@ export default function RecurringProcurementPage() {
                   )}
                 </button>
               </div>
-              <h2 className="mt-5 font-display text-xl font-bold">{plan.product}</h2>
+              <h2 className="mt-5 font-display text-xl font-bold">
+                {plan.product}
+              </h2>
               <p className="mt-2 font-display text-3xl font-extrabold text-forest-900">
                 {number(plan.quantity)}
                 <span className="ml-1 text-sm font-medium text-gray-500">
@@ -441,7 +456,9 @@ export default function RecurringProcurementPage() {
                 </div>
                 <div className="flex justify-between gap-3">
                   <dt className="text-gray-500">Preferred days</dt>
-                  <dd className="text-right font-bold">{plan.weekdays?.join(", ")}</dd>
+                  <dd className="text-right font-bold">
+                    {plan.weekdays?.join(", ")}
+                  </dd>
                 </div>
                 <div className="flex justify-between gap-3">
                   <dt className="text-gray-500">Grade</dt>
@@ -461,7 +478,9 @@ export default function RecurringProcurementPage() {
                 <div>
                   <p className="text-xs text-gray-500">Next automatic run</p>
                   <p className="font-bold">
-                    {plan.status === "ACTIVE" ? shortDate(plan.nextRun) : "Paused"}
+                    {plan.status === "ACTIVE"
+                      ? shortDate(plan.nextRun)
+                      : "Paused"}
                   </p>
                 </div>
               </div>
@@ -478,7 +497,10 @@ export default function RecurringProcurementPage() {
                 >
                   <Play className="h-4 w-4" /> Run now
                 </button>
-                <button className="btn-secondary" onClick={() => openEdit(plan)}>
+                <button
+                  className="btn-secondary"
+                  onClick={() => openEdit(plan)}
+                >
                   <Edit3 className="h-4 w-4" /> Manage
                 </button>
               </div>
@@ -488,7 +510,7 @@ export default function RecurringProcurementPage() {
       ) : (
         <EmptyState
           title="No recurring procurement plans"
-          description="Create a schedule and KisanExpress will open normal bulk requirements for supplier quotations."
+          description="Create a schedule and KISHAN BHAIYA will open normal bulk requirements for supplier quotations."
           action={
             <button className="btn-primary" onClick={openNew}>
               Create first plan
@@ -499,9 +521,9 @@ export default function RecurringProcurementPage() {
 
       <section className="mt-7 rounded-2xl border border-blue-200 bg-blue-50 p-5 text-sm leading-6 text-blue-900">
         <Clock3 className="mr-2 inline h-5 w-5" />
-        Automatic runs create standard bulk requirements. Sellers and FPOs then quote
-        through the normal procurement workflow; no purchase is made without your
-        quotation acceptance.
+        Automatic runs create standard bulk requirements. Sellers and FPOs then
+        quote through the normal procurement workflow; no purchase is made
+        without your quotation acceptance.
       </section>
 
       <Modal

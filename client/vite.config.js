@@ -9,11 +9,11 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg'],
       manifest: {
-        name: 'KisanExpress',
-        short_name: 'Kishan',
-        description: 'KisanExpress agriculture marketplace and smart logistics',
-        theme_color: '#153d2e',
-        background_color: '#f7f6ef',
+        name: 'KISHAN BHAIYA',
+        short_name: 'KISHAN',
+        description: 'Accessible digital agriculture services for farmers, FPOs and buyers',
+        theme_color: '#24145c',
+        background_color: '#fafafa',
         display: 'standalone',
         icons: [
           { src: '/pwa-192.svg', sizes: '192x192', type: 'image/svg+xml' },

@@ -118,7 +118,7 @@ export function LoginPage() {
                 ? "/admin"
                 : data.user.role === "business_buyer"
                   ? "/bulk"
-                  : "/marketplace";
+                  : "/stores";
       navigate(
         fallback === "/verification"
           ? fallback
@@ -278,14 +278,14 @@ export function RegisterPage() {
       toast.success(
         pending
           ? "Account created — verification review is next"
-          : "Your KisanExpress account is ready",
+          : "Your KISHAN BHAIYA account is ready",
       );
       navigate(
         pending
           ? "/verification"
           : data.user.role === "business_buyer"
             ? "/bulk"
-            : "/marketplace",
+            : "/stores",
       );
     } catch (error) {
       toast.error(apiError(error));
