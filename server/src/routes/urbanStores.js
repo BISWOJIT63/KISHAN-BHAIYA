@@ -22,6 +22,7 @@ const storeOrderSchema = z.object({
   deliveryAddress: z.string().trim().min(5).max(300),
   deliveryCoordinates: z
     .tuple([z.number().min(68).max(97.5), z.number().min(6).max(37.7)])
+    .nullable()
     .optional(),
   paymentMethod: z.enum(["COD", "UPI"]).default("COD"),
 });
@@ -189,7 +190,7 @@ async function updateInventoryAfterCheckout(lines, inventoryById, session) {
 
 async function createExpressOrder(req) {
   return store.transaction(async (session) => {
-    const [
+    let [
       urbanStore,
       buyer,
       allInventory,
@@ -206,6 +207,35 @@ async function createExpressOrder(req) {
       store.list("shipments", {}, session),
       store.list("vehicles", {}, session),
     ]);
+
+    // The public store endpoints intentionally expose demo stores when the
+    // backing database has not been seeded yet. Checkout must resolve the same
+    // records; otherwise a store can be visible and serviceable in the UI but
+    // impossible to order from.
+    if (!urbanStore) {
+      const seedData = buildSeedData();
+      urbanStore = (seedData.urbanStores || []).find(
+        (candidate) => candidate._id === req.params.id,
+      );
+      if (urbanStore) {
+        const fallbackInventory = (seedData.storeInventories || []).filter(
+          (item) => item.storeId === urbanStore._id,
+        );
+        const inventoryIds = new Set(allInventory.map((item) => item._id));
+        allInventory = [
+          ...allInventory,
+          ...fallbackInventory.filter((item) => !inventoryIds.has(item._id)),
+        ];
+
+        const productIds = new Set(products.map((item) => item._id));
+        products = [
+          ...products,
+          ...(seedData.products || []).filter(
+            (item) => !productIds.has(item._id),
+          ),
+        ];
+      }
+    }
     if (!urbanStore || urbanStore.status !== "OPEN") {
       throw new HttpError(409, "This urban store is not accepting orders");
     }

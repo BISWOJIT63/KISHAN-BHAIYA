@@ -23,6 +23,7 @@ import { api, apiError, getData } from "../api/client.js";
 import Logo from "../components/Logo.jsx";
 import { InlineLoader } from "../components/UI.jsx";
 import { useAppStore } from "../store/useAppStore.js";
+import { notifyInvalidForm } from "../utils/forms.js";
 import { detectCurrentIndiaLocation } from "../utils/location.js";
 
 const loginSchema = z.object({
@@ -92,7 +93,7 @@ export function LoginPage() {
   } = useForm({
     resolver: zodResolver(loginSchema),
     defaultValues: {
-      identifier: "buyer@kishanbhaiya.demo",
+      identifier: "consumer@kishanbhaiya.demo",
       password: "KishanBhaiya@2026",
     },
   });
@@ -132,7 +133,10 @@ export function LoginPage() {
 
   return (
     <AuthShell title={t("auth.welcome")} subtitle={t("auth.welcomeSub")}>
-      <form className="space-y-5" onSubmit={handleSubmit(submit)}>
+      <form
+        className="space-y-5"
+        onSubmit={handleSubmit(submit, notifyInvalidForm)}
+      >
         <Field
           label={t("auth.emailPhone")}
           placeholder="you@example.com"
@@ -181,7 +185,7 @@ export function LoginPage() {
             {t("auth.forgot")}
           </button>
         </div>
-        <button className="btn-primary w-full" disabled={isSubmitting}>
+        <button type="submit" className="btn-primary w-full" disabled={isSubmitting}>
           {isSubmitting ? (
             <InlineLoader label={t("auth.signing")} />
           ) : (
@@ -294,7 +298,10 @@ export function RegisterPage() {
 
   return (
     <AuthShell title={t("auth.joinTitle")} subtitle={t("auth.joinSub")}>
-      <form className="space-y-5" onSubmit={handleSubmit(submit)}>
+      <form
+        className="space-y-5"
+        onSubmit={handleSubmit(submit, notifyInvalidForm)}
+      >
         <div>
           <span className="label">{t("auth.joinAs")}</span>
           <div className="grid grid-cols-2 gap-2">
@@ -400,7 +407,7 @@ export function RegisterPage() {
           {...register("password")}
           error={errors.password?.message}
         />
-        <button className="btn-primary w-full" disabled={isSubmitting}>
+        <button type="submit" className="btn-primary w-full" disabled={isSubmitting}>
           {isSubmitting ? (
             <InlineLoader label={t("auth.creating")} />
           ) : (

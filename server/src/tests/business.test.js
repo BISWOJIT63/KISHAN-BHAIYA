@@ -322,7 +322,9 @@ describe("critical API path", () => {
       .send({
         items: [{ inventoryId: stock._id, quantity: stock.minimumQuantity }],
         deliveryAddress: "Patia apartment, Bhubaneswar",
-        deliveryCoordinates: [85.8245, 20.2961],
+        // A manually-entered/current location may not have coordinates yet.
+        // Checkout should fall back to the buyer/default point, not reject it.
+        deliveryCoordinates: null,
         paymentMethod: "COD",
       });
     expect(placed.status).toBe(200);

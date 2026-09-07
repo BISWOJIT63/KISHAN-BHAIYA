@@ -25,7 +25,11 @@ export default function CheckoutPage() {
       "Plot 214, Jayadev Vihar, Bhubaneswar, Odisha 751013",
     ),
     [slot, setSlot] = useState("Tomorrow · 8:00–11:00 AM"),
-    [idempotencyKey] = useState(() => crypto.randomUUID());
+    [idempotencyKey] = useState(
+      () =>
+        globalThis.crypto?.randomUUID?.() ||
+        `checkout-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
   const subtotal = cart.reduce(
       (n, i) =>
         n +
@@ -38,12 +42,24 @@ export default function CheckoutPage() {
   const order = useMutation({
     mutationFn: () => {
       if (isStoreOrder) {
-        return getData(api.post(`/urban-stores/${storeId}/orders`, {
-          items: cart.map((item) => ({ inventoryId: item.storeInventoryId, quantity: item.quantity })),
-          paymentMethod: payment === "COD" ? "COD" : "UPI",
-          deliveryAddress: address,
-          deliveryCoordinates: user?.locationCoordinates,
-        }));
+        return getData(
+          api.post(
+            `/urban-stores/${storeId}/orders`,
+            {
+              items: cart.map((item) => ({
+                inventoryId: item.storeInventoryId,
+                quantity: item.quantity,
+              })),
+              paymentMethod: payment === "COD" ? "COD" : "UPI",
+              deliveryAddress: address,
+              ...(Array.isArray(user?.locationCoordinates) &&
+              user.locationCoordinates.length === 2
+                ? { deliveryCoordinates: user.locationCoordinates }
+                : {}),
+            },
+            { headers: { "Idempotency-Key": idempotencyKey } },
+          ),
+        );
       }
       return getData(api.post(
           "/orders",
@@ -71,6 +87,15 @@ export default function CheckoutPage() {
     },
     onError: (e) => toast.error(apiError(e)),
   });
+  const submitOrder = (event) => {
+    event.preventDefault();
+    if (!address.trim()) {
+      toast.error("Enter a delivery address before placing the order");
+      document.getElementById("address")?.focus();
+      return;
+    }
+    if (!order.isPending) order.mutate();
+  };
   if (!cart.length)
     return (
       <div className="container-page py-14 text-center">
@@ -88,7 +113,11 @@ export default function CheckoutPage() {
         title={t("checkout.title")}
         description={t("checkout.description")}
       />
-      <div className="grid items-start gap-7 lg:grid-cols-[1fr_400px]">
+      <form
+        className="grid items-start gap-7 lg:grid-cols-[1fr_400px]"
+        onSubmit={submitOrder}
+        aria-busy={order.isPending}
+      >
         <div className="space-y-5">
           <section className="card p-6">
             <h2 className="flex items-center gap-2 font-display text-xl font-bold">
@@ -118,6 +147,7 @@ export default function CheckoutPage() {
               {["Tomorrow · 8:00–11:00 AM", "Tomorrow · 3:00–6:00 PM"].map(
                 (x) => (
                   <button
+                    type="button"
                     key={x}
                     onClick={() => setSlot(x)}
                     className={`rounded-2xl border p-4 text-left text-sm font-bold ${slot === x ? "border-forest-600 bg-forest-50 text-forest-800" : "border-gray-200"}`}
@@ -208,9 +238,9 @@ export default function CheckoutPage() {
             </div>
           </div>
           <button
+            type="submit"
             className="btn-primary mt-6 w-full"
             disabled={order.isPending || !address.trim()}
-            onClick={() => order.mutate()}
           >
             {order.isPending ? (
               <InlineLoader label={t("checkout.confirming")} />
@@ -226,7 +256,7 @@ export default function CheckoutPage() {
             Server-side stock checks may reject unavailable quantities.
           </p>
         </aside>
-      </div>
+      </form>
     </div>
   );
 }

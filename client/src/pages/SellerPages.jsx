@@ -36,6 +36,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api, apiError, getData } from "../api/client.js";
+import { notifyInvalidForm } from "../utils/forms.js";
 import {
   EmptyState,
   ErrorState,
@@ -399,6 +400,31 @@ const productSchema = z.object({
   locationName: z.string().min(2),
   packaging: z.string().min(2),
 });
+const quotationFormSchema = z.object({
+  quantity: z.coerce.number().positive("Enter the quantity offered"),
+  pricePerUnit: z.coerce.number().positive("Enter a price per unit"),
+  deliveryDate: z.string().min(1, "Choose a delivery date"),
+  transportCost: z.coerce.number().min(0, "Transport cost cannot be negative"),
+  transportIncluded: z.boolean(),
+  paymentTerms: z.string().min(2, "Enter payment terms"),
+  validUntil: z.string().min(1, "Choose how long this quote is valid"),
+  note: z.string().max(1000, "Keep the message under 1,000 characters").optional(),
+});
+const harvestFormSchema = z.object({
+  product: z.string().min(2, "Choose a crop"),
+  productId: z.string().optional(),
+  expectedQuantity: z.coerce.number().positive("Enter the expected quantity"),
+  expectedHarvestDate: z.string().min(1, "Choose the expected harvest date"),
+  grade: z.string().min(1, "Choose a grade"),
+  minimumPrice: z.coerce.number().positive("Enter the minimum price"),
+  location: z.string().min(2, "Enter the harvest location"),
+  reservationPercent: z.coerce.number().min(0).max(100),
+});
+const dateAfter = (days) => {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+};
 export function ProductFormPage() {
   const navigate = useNavigate(),
     queryClient = useQueryClient(),
@@ -558,7 +584,7 @@ export function ProductFormPage() {
         </div>}
       />
       <form
-        onSubmit={handleSubmit(submit)}
+        onSubmit={handleSubmit(submit, notifyInvalidForm)}
         className="grid items-start gap-6 xl:grid-cols-[1fr_320px]"
       >
         <section className="card p-6 sm:p-8">
@@ -708,7 +734,7 @@ export function ProductFormPage() {
             </label>
           </div>
           <div className="mt-7 flex flex-col gap-3 border-t pt-6 sm:flex-row">
-            <button className="btn-primary" disabled={isSubmitting}>
+            <button type="submit" className="btn-primary" disabled={isSubmitting}>
               {isSubmitting ? (
                 <InlineLoader label="Publishing…" />
               ) : (
@@ -760,15 +786,21 @@ export function SellerRequestsPage() {
   });
   const [selected, setSelected] = useState(null),
     queryClient = useQueryClient();
-  const { register, handleSubmit, reset } = useForm({
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors },
+  } = useForm({
+    resolver: zodResolver(quotationFormSchema),
     defaultValues: {
       quantity: 500,
       pricePerUnit: 25.5,
-      deliveryDate: "2026-08-29",
+      deliveryDate: dateAfter(7),
       transportCost: 800,
       transportIncluded: false,
       paymentTerms: "Payment within 7 days",
-      validUntil: "2026-08-27",
+      validUntil: dateAfter(3),
       note: "Fresh lot available after final quality check.",
     },
   });
@@ -791,7 +823,7 @@ export function SellerRequestsPage() {
       transportCost: 800,
       transportIncluded: false,
       paymentTerms: "Payment within 7 days",
-      validUntil: "2026-08-27",
+      validUntil: dateAfter(3),
       note: "Fresh lot available after final quality check.",
     });
   };
@@ -826,20 +858,22 @@ export function SellerRequestsPage() {
         title={`Quote · ${selected?.product || ""}`}
       >
         <form
-          onSubmit={handleSubmit((v) =>
-            mutation.mutate({
-              ...v,
-              quantity: Number(v.quantity),
-              pricePerUnit: Number(v.pricePerUnit),
-              transportCost: Number(v.transportCost),
-            }),
+          onSubmit={handleSubmit(
+            (v) =>
+              mutation.mutate({
+                ...v,
+                quantity: Number(v.quantity),
+                pricePerUnit: Number(v.pricePerUnit),
+                transportCost: Number(v.transportCost),
+              }),
+            notifyInvalidForm,
           )}
           className="grid gap-4 sm:grid-cols-2"
         >
-          <FormField label="Quantity offered">
+          <FormField label="Quantity offered" error={errors.quantity?.message}>
             <input type="number" className="input" {...register("quantity")} />
           </FormField>
-          <FormField label="Price per unit">
+          <FormField label="Price per unit" error={errors.pricePerUnit?.message}>
             <input
               type="number"
               step="0.1"
@@ -847,14 +881,14 @@ export function SellerRequestsPage() {
               {...register("pricePerUnit")}
             />
           </FormField>
-          <FormField label="Delivery date">
+          <FormField label="Delivery date" error={errors.deliveryDate?.message}>
             <input
               type="date"
               className="input"
               {...register("deliveryDate")}
             />
           </FormField>
-          <FormField label="Transport cost">
+          <FormField label="Transport cost" error={errors.transportCost?.message}>
             <input
               type="number"
               className="input"
@@ -862,11 +896,11 @@ export function SellerRequestsPage() {
             />
           </FormField>
           <div className="sm:col-span-2">
-            <FormField label="Payment terms">
+            <FormField label="Payment terms" error={errors.paymentTerms?.message}>
               <input className="input" {...register("paymentTerms")} />
             </FormField>
           </div>
-          <FormField label="Valid until">
+          <FormField label="Valid until" error={errors.validUntil?.message}>
             <input type="date" className="input" {...register("validUntil")} />
           </FormField>
           <label className="flex items-center gap-2 pt-8 text-sm font-bold">
@@ -883,6 +917,7 @@ export function SellerRequestsPage() {
             </FormField>
           </div>
           <button
+            type="submit"
             className="btn-primary sm:col-span-2"
             disabled={mutation.isPending}
           >
@@ -988,12 +1023,17 @@ export function HarvestsPage() {
     queryKey: ["harvests"],
     queryFn: () => getData(api.get("/expected-harvests")),
   });
-  const { register, handleSubmit } = useForm({
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+  } = useForm({
+    resolver: zodResolver(harvestFormSchema),
     defaultValues: {
       product: "Fresh Desi Tomato",
       productId: "prod-tomato",
       expectedQuantity: 2500,
-      expectedHarvestDate: "2026-09-12",
+      expectedHarvestDate: dateAfter(14),
       grade: "A",
       minimumPrice: 25,
       location: "Khordha",
@@ -1117,13 +1157,15 @@ export function HarvestsPage() {
         title="Post expected harvest"
       >
         <form
-          onSubmit={handleSubmit((v) =>
-            mutation.mutate({
-              ...v,
-              expectedQuantity: Number(v.expectedQuantity),
-              minimumPrice: Number(v.minimumPrice),
-              reservationPercent: Number(v.reservationPercent),
-            }),
+          onSubmit={handleSubmit(
+            (v) =>
+              mutation.mutate({
+                ...v,
+                expectedQuantity: Number(v.expectedQuantity),
+                minimumPrice: Number(v.minimumPrice),
+                reservationPercent: Number(v.reservationPercent),
+              }),
+            notifyInvalidForm,
           )}
           className="grid gap-4 sm:grid-cols-2"
         >
@@ -1134,14 +1176,14 @@ export function HarvestsPage() {
               <option>Fresh Cauliflower</option>
             </select>
           </FormField>
-          <FormField label="Expected quantity">
+          <FormField label="Expected quantity" error={errors.expectedQuantity?.message}>
             <input
               type="number"
               className="input"
               {...register("expectedQuantity")}
             />
           </FormField>
-          <FormField label="Harvest date">
+          <FormField label="Harvest date" error={errors.expectedHarvestDate?.message}>
             <input
               type="date"
               className="input"
@@ -1155,18 +1197,18 @@ export function HarvestsPage() {
               <option>B</option>
             </select>
           </FormField>
-          <FormField label="Minimum price">
+          <FormField label="Minimum price" error={errors.minimumPrice?.message}>
             <input
               type="number"
               className="input"
               {...register("minimumPrice")}
             />
           </FormField>
-          <FormField label="Location">
+          <FormField label="Location" error={errors.location?.message}>
             <input className="input" {...register("location")} />
           </FormField>
           <div className="sm:col-span-2">
-            <FormField label="Reservation percentage allowed">
+            <FormField label="Reservation percentage allowed" error={errors.reservationPercent?.message}>
               <input
                 type="number"
                 className="input"
@@ -1175,6 +1217,7 @@ export function HarvestsPage() {
             </FormField>
           </div>
           <button
+            type="submit"
             className="btn-primary sm:col-span-2"
             disabled={mutation.isPending}
           >

@@ -34,6 +34,7 @@ import ProductCard from "../components/ProductCard.jsx";
 import UserAvatar from "../components/UserAvatar.jsx";
 import { EmptyState, InlineLoader, PageHeader, VerifiedBadge } from "../components/UI.jsx";
 import { useAppStore } from "../store/useAppStore.js";
+import { notifyInvalidForm } from "../utils/forms.js";
 import { canShop, workspaceForRole } from "../utils/navigation.js";
 import { detectCurrentIndiaLocation } from "../utils/location.js";
 
@@ -82,6 +83,14 @@ function Toggle({ checked, onChange, label, description, icon: Icon }) {
   );
 }
 
+const displayValue = (value, fallback = "—") => {
+  if (value === null || value === undefined) return fallback;
+  const text = String(value).trim();
+  return text && !["null", "undefined", "unexpected"].includes(text.toLowerCase())
+    ? text
+    : fallback;
+};
+
 export function ProfilePage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -110,12 +119,15 @@ export function ProfilePage() {
   const producer = ["farmer", "fpo_manager"].includes(user?.role);
   const shoppingEnabled = canShop(user?.role);
   const showOrganization = user?.role !== "consumer";
+  const roleLabel = user?.role
+    ? t(`role.${user.role}`, displayValue(user.role, t("profile.notProvided")))
+    : t("profile.notProvided");
   const details = [
-    [t("profile.email"), user?.email || "—"],
-    [t("profile.phone"), user?.phone || "—"],
-    ...(showOrganization ? [[t("profile.organization"), user?.organization || t("profile.notProvided")]] : []),
-    [t("profile.city"), user?.location || location],
-    [t("profile.accountType"), t(`role.${user?.role}`, user?.role)],
+    [t("profile.email"), displayValue(user?.email)],
+    [t("profile.phone"), displayValue(user?.phone)],
+    ...(showOrganization ? [[t("profile.organization"), displayValue(user?.organization, t("profile.notProvided"))]] : []),
+    [t("profile.city"), displayValue(user?.location || location, t("profile.notProvided"))],
+    [t("profile.accountType"), roleLabel],
   ];
   const {
     register,
@@ -277,12 +289,12 @@ export function ProfilePage() {
                 aria-label={t("profile.uploadPhoto")}
               />
             </div>
-            <h2 className="mt-4 font-display text-xl font-bold">{user?.name}</h2>
+            <h2 className="mt-4 font-display text-xl font-bold">{displayValue(user?.name, t("profile.notProvided"))}</h2>
             <p className="mt-1 text-sm text-gray-500">
-              {t(`role.${user?.role}`, user?.role)}
+              {roleLabel}
             </p>
             {user?.verified && (
-              <div className="mt-3"><VerifiedBadge /></div>
+              <div className="mt-3"><VerifiedBadge label={producer ? "Verified producer" : "Verified account"} /></div>
             )}
             <p className="mx-auto mt-4 max-w-52 text-xs leading-5 text-gray-500">
               {t("profile.photoHint")}
@@ -340,7 +352,7 @@ export function ProfilePage() {
               )}
             </div>
             {editing ? (
-              <form className="mt-6 grid gap-5 sm:grid-cols-2" onSubmit={handleSubmit(updateProfile)}>
+              <form className="mt-6 grid gap-5 sm:grid-cols-2" onSubmit={handleSubmit(updateProfile, notifyInvalidForm)}>
                 <FormField label={t("profile.fullName")} error={errors.name?.message} icon={UserRound}>
                   <input className="input pl-10" autoComplete="name" {...register("name")} />
                 </FormField>
@@ -362,7 +374,7 @@ export function ProfilePage() {
                   <button type="button" className="btn-secondary mt-2 w-full" disabled={locating} onClick={() => applyCurrentLocation("profile")}><LocateFixed className="h-4 w-4" />{locating ? "Detecting location…" : "Use current location"}</button>
                 </div>
                 <div className="flex items-end gap-2 sm:col-span-2">
-                  <button className="btn-primary" disabled={isSubmitting}>
+                  <button type="submit" className="btn-primary" disabled={isSubmitting}>
                     {isSubmitting ? <InlineLoader label={t("profile.saving")} /> : <><Save className="h-4 w-4" /> {t("profile.saveChanges")}</>}
                   </button>
                   <button

@@ -28,6 +28,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { api, apiError, getData } from "../api/client.js";
 import { useAppStore } from "../store/useAppStore.js";
+import { notifyInvalidForm } from "../utils/forms.js";
 import {
   EmptyState,
   ErrorState,
@@ -300,7 +301,7 @@ export function NewRequirementPage() {
         description="Receive structured price offers from verified farmers and FPOs. Details remain editable until negotiation begins."
       />
       <form
-        onSubmit={handleSubmit(submit)}
+        onSubmit={handleSubmit(submit, notifyInvalidForm)}
         className="grid gap-6 lg:grid-cols-[1fr_300px]"
       >
         <section className="card space-y-6 p-6 sm:p-8">
@@ -457,6 +458,7 @@ export function NewRequirementPage() {
             </div>
           )}
           <button
+            type="submit"
             className="btn-primary w-full sm:w-auto"
             disabled={isSubmitting}
           >
@@ -1142,7 +1144,7 @@ export function NegotiationPage() {
       >
         <form
           id="counter-form"
-          onSubmit={handleSubmit((v) => counter.mutate(v))}
+          onSubmit={handleSubmit((v) => counter.mutate(v), notifyInvalidForm)}
           className="grid gap-4 sm:grid-cols-2"
         >
           <Field label={`Price per ${requirement.unit}`}>
@@ -1181,6 +1183,7 @@ export function NegotiationPage() {
             </Field>
           </div>
           <button
+            type="submit"
             className="btn-primary sm:col-span-2"
             disabled={isSubmitting || counter.isPending}
           >
