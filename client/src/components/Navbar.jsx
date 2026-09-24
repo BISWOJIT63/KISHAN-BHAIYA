@@ -1,4 +1,5 @@
 import React from "react";
+import { useDismissiblePopover } from "../hooks/useDismissiblePopover.js";
 import {
   Bell,
   ChevronDown,
@@ -50,6 +51,7 @@ export default function Navbar({ sidebarNavigation = false }) {
   const shoppingEnabled = accountActive && canShop(user?.role);
   const count = cart.reduce((n, i) => n + i.quantity, 0);
   const [profileOpen, setProfileOpen] = React.useState(false);
+  const profileRef = useDismissiblePopover(profileOpen, setProfileOpen);
   const logout = async () => {
     try {
       await api.post("/auth/logout");
@@ -63,7 +65,7 @@ export default function Navbar({ sidebarNavigation = false }) {
   };
   return (
     <>
-      <header className="sticky top-0 z-50 border-b border-gray-200 bg-white/95 backdrop-blur-xl">
+      <header className="sticky top-0 z-50 border-b border-gray-200 bg-white">
         <div className="bg-forest-950 text-white">
           <div className="container-page flex min-h-9 items-center justify-between gap-3 py-1 text-[11px] font-semibold">
             <div className="flex items-center gap-3">
@@ -140,10 +142,13 @@ export default function Navbar({ sidebarNavigation = false }) {
             {user ? (
               // Below lg the mobile menu already carries profile + sign out, so
               // this dropdown would be a duplicate entry point.
-              <div className="relative hidden lg:block">
+              <div ref={profileRef} className="relative hidden lg:block">
                 <button
                   className="flex h-10 items-center gap-2 rounded-xl px-2 hover:bg-forest-50"
-                  onClick={() => setProfileOpen(!profileOpen)}
+                  onClick={() => setProfileOpen((value) => !value)}
+                  aria-label="Profile menu"
+                  aria-expanded={profileOpen}
+                  aria-controls="profile-menu"
                 >
                   <UserAvatar user={user} className="h-8 w-8 rounded-full text-xs" />
                   <span className="hidden text-left xl:block">
@@ -157,7 +162,7 @@ export default function Navbar({ sidebarNavigation = false }) {
                   <ChevronDown className="h-3 w-3" />
                 </button>
                 {profileOpen && (
-                  <div className="card absolute right-0 top-12 w-56 p-2 shadow-lift">
+                  <div id="profile-menu" className="card absolute right-0 top-12 w-56 p-2 shadow-lift">
                     <Link
                       className="btn-ghost w-full justify-start"
                       to={workspaceForRole(user.role)}

@@ -1,0 +1,22 @@
+const fs=require('fs');
+const {chromium}=require('C:/Users/sahoo/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+(async()=>{
+const source='C:/Users/sahoo/.codex/visualizations/2026/09/12/01a096be-ae8d-74d3-8866-8c3ca7735c97/kishan-full-architecture.html';
+let fragment=fs.readFileSync(source,'utf8');
+fragment=fragment.replace(/https:\/\/cdn.jsdelivr.net\/gh\/devicons\/devicon@v2.17.0\/icons\/([a-z]+)\/[a-z]+-original.svg/g,(_,name)=>'data:image/svg+xml;base64,'+fs.readFileSync('C:/SIH-2026/output/architecture-logos/'+name+'.svg').toString('base64'));
+fs.writeFileSync(source,fragment);
+const css=':root{--foreground:#182b3b;--background:#ffffff;--border:#d4dee6;--blue:#1268b3;--purple:#7545b4;--green:#218343;--orange:#bc6519}body{font:15px/1.5 Arial,sans-serif;max-width:1000px;margin:32px auto;padding:20px}h2{font-size:26px}h3{font-size:18px}strong{font-weight:600}.text-small{font-size:12px}.btn{padding:9px 13px;border:1px solid #ccd5df;border-radius:6px;background:white;color:#183448;cursor:pointer}.btn[aria-pressed=true]{background:#e4f1ff;border-color:#1268b3}';
+const html='<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>KISHAN BHAIYA Architecture</title><style>'+css+'</style></head><body>'+fragment+'</body></html>';
+fs.writeFileSync('C:/SIH-2026/output/kishan-full-architecture.html',html);
+const browser=await chromium.launch({headless:true,channel:'msedge'});
+const page=await browser.newPage({viewport:{width:1100,height:900},deviceScaleFactor:1.5});
+await page.setContent(html,{waitUntil:'networkidle',timeout:60000});
+console.log('logos',await page.locator('img').evaluateAll(imgs=>imgs.map(i=>({name:i.alt,loaded:i.complete&&i.naturalWidth>0}))));
+await page.getByRole('button',{name:'Request → database'}).click();
+console.log('highlight',await page.locator('#kishan-architecture').getAttribute('data-focus'));
+await page.getByRole('button',{name:'All connections'}).click();
+await page.screenshot({path:'C:/SIH-2026/output/kishan-full-architecture.png',fullPage:true});
+await page.setViewportSize({width:375,height:850});
+console.log('mobile overflow',await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth));
+await browser.close();
+})();

@@ -58,7 +58,7 @@ export default function AccessibilityToolbar() {
       <span className="mx-1 h-4 w-px bg-white/25" aria-hidden="true" />
       <button
         type="button"
-        className={`ux4g-utility-button ${highContrast ? "bg-white text-forest-950" : ""}`}
+        className="ux4g-utility-button ux4g-accessibility-button"
         onClick={() => setHighContrast((value) => !value)}
         aria-pressed={highContrast}
         aria-label="Toggle high contrast"

@@ -1,4 +1,5 @@
 import React from "react";
+import { useDismissiblePopover } from "../hooks/useDismissiblePopover.js";
 import {
   Bell,
   BellRing,
@@ -73,27 +74,24 @@ export function NotificationRow({ notification, onSelect }) {
 export default function NotificationBell() {
   const { t } = useTranslation();
   const [open, setOpen] = React.useState(false);
+  const popoverRef = useDismissiblePopover(open, setOpen);
   const { notifications, unreadCount, hasUnread, markAllRead, open: openNotification } =
     useNotifications();
 
-  // Close on Escape and lock background scroll while the mobile sheet is up.
+  // Lock background scroll while the mobile sheet is up.
   React.useEffect(() => {
     if (!open) return undefined;
-    const onKeyDown = (event) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("keydown", onKeyDown);
     const previousOverflow = document.body.style.overflow;
     if (window.matchMedia("(max-width: 639px)").matches)
       document.body.style.overflow = "hidden";
     return () => {
-      document.removeEventListener("keydown", onKeyDown);
+
       document.body.style.overflow = previousOverflow;
     };
   }, [open]);
 
   return (
-    <div className="relative">
+    <div ref={popoverRef} className="relative">
       <button
         type="button"
         data-tour="notifications"
@@ -116,14 +114,14 @@ export default function NotificationBell() {
 
       {open && (
         <>
-          {/* Dims the page on phones; on desktop it is an invisible click-catcher. */}
+          {/* Dims the page on phones; desktop outside clicks are handled by the hook. */}
           <div
-            className="fixed inset-0 z-[60] bg-ink/40 backdrop-blur-sm sm:bg-transparent sm:backdrop-blur-none"
-            onMouseDown={() => setOpen(false)}
+            className="fixed inset-0 z-[60] bg-ink/40 backdrop-blur-sm sm:hidden"
+            onPointerDown={() => setOpen(false)}
           />
           <div
             role="dialog"
-            aria-modal="true"
+
             aria-label={t("notifications.title")}
             className={cx(
               // Phone: modal bottom sheet. It deliberately sits over the tab bar

@@ -1,25 +1,6 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
-import { motion as Motion, AnimatePresence } from "framer-motion";
-import {
-  Newspaper,
-  Wind,
-  Sparkles,
-  ShieldCheck,
-  Play,
-  Clock,
-  Search,
-  ExternalLink,
-  ChevronRight,
-  Filter,
-  CheckCircle2,
-  AlertTriangle,
-  FileText,
-  Volume2,
-  Video,
-  Share2,
-  X,
-} from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { Newspaper, Wind, Sprout, Landmark, Lightbulb, Clock, Search, ArrowUpRight, X } from "lucide-react";
 import { PageMotion, Stagger, StaggerItem } from "../components/Motion.jsx";
 
 // Exported for homepage/news reuse; the remainder of this file is the page.
@@ -164,322 +145,157 @@ Key Success Drivers:
   },
 ];
 
+const categories = [
+  { id: "all", label: "All updates", icon: Newspaper },
+  { id: "cyclone", label: "Cyclone & weather", icon: Wind },
+  { id: "government", label: "Government & MSP", icon: Landmark },
+  { id: "tech", label: "Agri-tech & training", icon: Lightbulb },
+  { id: "crop-health", label: "Crop health", icon: Sprout },
+];
+
+function NewsImage({ src, className }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <div className={"overflow-hidden bg-emerald-50 " + className}>
+      {failed ? (
+        <div aria-hidden="true" className="flex h-full w-full items-center justify-center bg-gradient-to-br from-emerald-100 to-emerald-50 text-emerald-700/50"><Newspaper className="h-16 w-16" strokeWidth={1} /></div>
+      ) : (
+        <img src={src} alt="" loading="lazy" onError={() => setFailed(true)} className="h-full w-full object-cover" />
+      )}
+    </div>
+  );
+}
+
+function ArticleReader({ article, onClose }) {
+  const dialogRef = useRef(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    const previousOverflow = document.body.style.overflow;
+    dialog.showModal();
+    document.body.style.overflow = "hidden";
+    return () => {
+      dialog.close();
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
+
+  return createPortal(
+    <dialog
+      ref={dialogRef}
+      aria-labelledby="news-reader-title"
+      onCancel={onClose}
+      onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
+      className="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-3xl overflow-hidden rounded-2xl bg-white p-0 text-slate-900 shadow-2xl backdrop:bg-slate-950/60 backdrop:backdrop-blur-sm"
+    >
+      <div className="flex max-h-[calc(100dvh-2rem)] flex-col">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-5 py-3 sm:px-8">
+          <span className="text-sm font-semibold text-emerald-800">Article reader · Sample bulletin</span>
+          <button autoFocus type="button" onClick={onClose} aria-label="Close article" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-slate-600 hover:bg-slate-100">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="min-h-0 overflow-y-auto overscroll-contain p-5 sm:p-8">
+          <span className={"inline-flex rounded-full border px-3 py-1 text-xs font-semibold " + article.tagColor}>{article.categoryLabel}</span>
+          <h2 id="news-reader-title" className="mt-4 text-2xl font-bold leading-snug tracking-tight sm:text-3xl">{article.title}</h2>
+          <p className="mt-3 text-sm leading-relaxed text-slate-500">{article.date} · {article.readTime}</p>
+          <p className="mt-1 text-sm text-slate-600">Listed source: {article.source}</p>
+          <NewsImage src={article.image} className="mt-6 aspect-[16/8] w-full rounded-xl" />
+          <p className="my-6 border-l-4 border-emerald-600 bg-emerald-50 p-4 text-base leading-relaxed text-emerald-950">{article.summary}</p>
+          <div className="space-y-5 text-sm leading-7 text-slate-700 sm:text-base">
+            {article.description.split(/\n\s*\n/).map((paragraph, index) => <p key={index} className="whitespace-pre-line">{paragraph}</p>)}
+          </div>
+        </div>
+        <div className="flex shrink-0 justify-end border-t border-slate-200 bg-slate-50 px-5 py-3 sm:px-8">
+          <button type="button" onClick={onClose} className="btn-primary">Back to updates</button>
+        </div>
+      </div>
+    </dialog>,
+    document.body,
+  );
+}
+
 export function NewsPage() {
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeVideoArticle, setActiveVideoArticle] = useState(null);
-  const [activeDetailArticle, setActiveDetailArticle] = useState(null);
-
-  const filteredArticles = newsArticles.filter((article) => {
-    const matchesCategory =
-      selectedCategory === "all" || article.category === selectedCategory;
-    const matchesSearch =
-      article.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      article.summary.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      article.source.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesCategory && matchesSearch;
-  });
+  const [activeArticle, setActiveArticle] = useState(null);
+  const query = searchQuery.trim().toLowerCase();
+  const filteredArticles = newsArticles.filter((article) =>
+    (selectedCategory === "all" || article.category === selectedCategory) &&
+    [article.title, article.summary, article.source].some((value) => value.toLowerCase().includes(query)),
+  );
+  const resetFilters = () => { setSelectedCategory("all"); setSearchQuery(""); };
 
   return (
-    <PageMotion className="bg-[#f4f4f8] text-[#17221d] min-h-screen pb-16 font-sans">
-      
-      {/* Top Banner Header - Centered */}
-      <section className="bg-[#14432e] text-white pt-10 pb-16 px-4 sm:px-6 relative overflow-hidden text-center">
-        <div className="absolute inset-0 opacity-10 pointer-events-none bg-[radial-gradient(#ffffff_1px,transparent_1px)] [background-size:16px_16px]" />
-        
-        <div className="max-w-4xl mx-auto relative z-10 flex flex-col items-center justify-center">
-          <div className="flex flex-wrap items-center justify-center gap-2 mb-3">
-            <span className="badge bg-red-600 text-white font-bold text-xs uppercase px-3 py-1 rounded-full animate-pulse flex items-center gap-1.5">
-              <Wind className="w-3.5 h-3.5" />
-              Live Government Bulletin
-            </span>
-            <span className="badge bg-white/10 text-white text-xs px-3 py-1 rounded-full border border-white/20">
-              IMD · Ministry of Agriculture · ICAR
-            </span>
+    <PageMotion className="min-h-screen bg-[#f5f7f5] pb-16 text-slate-900">
+      <header className="border-b border-emerald-900 bg-[#14432e] px-4 py-10 text-white sm:px-6 sm:py-14">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-10">
+          <div className="max-w-3xl">
+            <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-200"><Newspaper className="h-4 w-4" /> The farming bulletin</p>
+            <h1 className="mt-4 text-3xl font-bold leading-tight tracking-tight sm:text-4xl lg:text-5xl">Government news,<br className="hidden sm:block" /> advisories &amp; notifications</h1>
+            <p className="mt-5 max-w-2xl text-sm leading-7 text-emerald-50/85 sm:text-base">Explore cyclone and weather advisories, government schemes, crop care and agricultural training in one place.</p>
           </div>
-
-          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-white leading-tight">
-            Government News, Cyclone Advisories &amp; Notifications
-          </h1>
-          <p className="mt-3 text-sm sm:text-base text-white/85 max-w-2xl leading-relaxed mx-auto">
-            Stay updated with authoritative agricultural notifications, cyclone warnings, Kharif MSP rate charts, government subsidy schemes, and instructional field training videos.
-          </p>
-
-          {/* Search & Filter Controls - Centered */}
-          <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 w-full max-w-3xl">
-            <div className="relative flex-1 w-full">
-              <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search advisories, cyclone alerts, MSP schemes, or subsidies..."
-                className="w-full bg-white text-gray-900 pl-10 pr-4 py-2.5 rounded-xl text-xs sm:text-sm outline-none border border-gray-200 shadow-sm placeholder:text-gray-400"
-              />
-            </div>
-
-            <div className="flex flex-wrap items-center justify-center gap-1.5 w-full sm:w-auto">
-              {[
-                { id: "all", label: "All Updates" },
-                { id: "cyclone", label: "🌪️ Cyclone & Weather" },
-                { id: "government", label: "🏛️ Govt & MSP" },
-                { id: "tech", label: "💡 Agri-Tech & Training" },
-                { id: "crop-health", label: "🌱 Crop Health" },
-              ].map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setSelectedCategory(tab.id)}
-                  className={`text-xs px-3 py-2 rounded-xl font-bold transition border ${
-                    selectedCategory === tab.id
-                      ? "bg-[#fffa43] text-[#14432e] border-[#fffa43] shadow"
-                      : "bg-white/10 text-white border-white/20 hover:bg-white/20"
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-          </div>
+          <div aria-hidden="true" className="hidden h-36 w-36 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/5 lg:flex"><Sprout className="h-16 w-16 text-emerald-200" strokeWidth={1.25} /></div>
         </div>
-      </section>
+      </header>
 
-      {/* Main Content Feed */}
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 -mt-6">
-        
-        {/* Results Counter */}
-        <div className="flex items-center justify-between bg-white rounded-xl p-4 shadow-sm border border-gray-200/80 mb-6">
-          <p className="text-xs sm:text-sm font-semibold text-gray-700">
-            Showing <span className="text-[#1d5f41] font-bold">{filteredArticles.length}</span> official notifications &amp; advisories
-          </p>
-          <div className="flex items-center gap-2 text-xs text-gray-500">
-            <Video className="w-4 h-4 text-red-600" />
-            <span>Click any article to watch full video &amp; details</span>
+      <section aria-label="News and advisory feed" className="mx-auto max-w-6xl px-4 pt-6 sm:px-6 sm:pt-8">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+            <div><h2 className="text-lg font-bold">Find an update</h2><p className="mt-1 text-sm text-slate-500">Browse by topic or search the bulletin.</p></div>
+            <div className="relative w-full sm:max-w-md">
+              <Search aria-hidden="true" className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+              <input type="search" aria-label="Search news and advisories" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search weather, MSP, schemes…" className="h-12 w-full rounded-xl border border-slate-300 bg-slate-50 pl-12 pr-4 text-sm placeholder:text-slate-500 focus:border-emerald-600 focus:bg-white" />
+            </div>
+          </div>
+          <div className="mt-5 flex flex-wrap gap-2 border-t border-slate-100 pt-5" role="group" aria-label="Filter by topic">
+            {categories.map(({ id, label, icon: Icon }) => (
+              <button key={id} type="button" aria-pressed={selectedCategory === id} onClick={() => setSelectedCategory(id)} className={"inline-flex min-h-11 items-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold transition sm:px-4 sm:text-sm " + (selectedCategory === id ? "border-emerald-800 bg-emerald-800 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-900")}>
+                <Icon className="h-4 w-4 shrink-0" />{label}
+              </button>
+            ))}
           </div>
         </div>
 
-        {/* Articles Grid */}
-        <Stagger className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredArticles.map((article) => (
-            <StaggerItem key={article.id}>
-              <article className="bg-white rounded-2xl overflow-hidden border border-gray-200/90 shadow-sm hover:shadow-lg transition-all duration-300 flex flex-col justify-between group">
-                <div>
-                  {/* Thumbnail with Video Play Overlay */}
-                  <div className="relative h-48 overflow-hidden bg-black">
-                    <img
-                      src={article.image}
-                      alt={article.title}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 opacity-95"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+        <div className="flex flex-wrap items-center justify-between gap-3 py-6">
+          <p role="status" className="text-sm text-slate-600"><span className="font-bold text-slate-900">{filteredArticles.length} {filteredArticles.length === 1 ? "update" : "updates"}</span> {selectedCategory === "all" ? "across all topics" : "in " + categories.find((category) => category.id === selectedCategory).label.toLowerCase()}</p>
+          {(selectedCategory !== "all" || searchQuery) && <button type="button" onClick={resetFilters} className="min-h-11 text-sm font-semibold text-emerald-800 underline underline-offset-4">Clear filters</button>}
+          <p className="w-full text-xs leading-relaxed text-slate-500">Sample bulletin content · This page is not connected to a live government feed.</p>
+        </div>
 
-                    {/* Category Badge */}
-                    <span
-                      className={`absolute top-3 left-3 text-[10px] font-bold px-2.5 py-0.5 rounded-md border shadow-sm ${article.tagColor}`}
-                    >
-                      {article.categoryLabel}
-                    </span>
-
-                    {/* Video Play Button Overlay */}
-                    <button
-                      type="button"
-                      onClick={() => setActiveVideoArticle(article)}
-                      className="absolute inset-0 m-auto w-12 h-12 rounded-full bg-red-600/90 hover:bg-red-600 text-white flex items-center justify-center shadow-lg transform group-hover:scale-110 transition backdrop-blur-sm"
-                      aria-label="Play educational video"
-                    >
-                      <Play className="w-5 h-5 ml-0.5 fill-current" />
-                    </button>
-
-                    <span className="absolute bottom-3 left-3 text-[10.5px] font-bold text-white flex items-center gap-1.5 drop-shadow">
-                      <Video className="w-3.5 h-3.5 text-red-400" />
-                      <span>Watch Advisory Video</span>
-                    </span>
+        {filteredArticles.length > 0 ? (
+          <Stagger className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {filteredArticles.map((article) => (
+              <StaggerItem key={article.id} className="h-full min-w-0">
+                <article className="group flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md">
+                  <div className="relative aspect-[16/9] overflow-hidden bg-emerald-50">
+                    <NewsImage src={article.image} className="h-full w-full transition-transform duration-500 motion-safe:group-hover:scale-105" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
+                    <span className={"absolute bottom-3 left-3 right-3 w-fit max-w-[calc(100%-1.5rem)] rounded-lg border px-3 py-1.5 text-xs font-semibold shadow-sm " + article.tagColor}>{article.categoryLabel}</span>
                   </div>
-
-                  {/* Article Text */}
-                  <div className="p-5">
-                    <div className="flex items-center justify-between text-[11px] text-gray-500 mb-2">
-                      <span className="font-bold text-gray-700 truncate max-w-[180px]">
-                        {article.source}
-                      </span>
-                      <span className="flex items-center gap-1 shrink-0">
-                        <Clock className="w-3 h-3" />
-                        {article.date}
-                      </span>
+                  <div className="flex flex-1 flex-col p-5 sm:p-6">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500"><span>{article.date}</span><span className="inline-flex items-center gap-1"><Clock className="h-3.5 w-3.5" />{article.readTime}</span></div>
+                    <h3 className="mt-3 text-lg font-bold leading-snug tracking-tight text-slate-900">{article.title}</h3>
+                    <p className="mt-3 line-clamp-3 text-sm leading-6 text-slate-600">{article.summary}</p>
+                    <div className="mt-auto pt-5">
+                      <p className="mb-4 text-xs leading-5 text-slate-500">Listed source: {article.source}</p>
+                      <button type="button" onClick={() => setActiveArticle(article)} aria-label={"Read article: " + article.title} className="flex min-h-11 w-full items-center justify-between gap-3 rounded-xl bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-900 transition hover:bg-emerald-800 hover:text-white">Read article<ArrowUpRight className="h-4 w-4 shrink-0" /></button>
                     </div>
-
-                    <h2 className="text-base font-bold text-gray-900 leading-snug group-hover:text-[#1d5f41] transition line-clamp-2">
-                      {article.title}
-                    </h2>
-                    <p className="text-xs text-gray-600 mt-2 line-clamp-3 leading-relaxed">
-                      {article.summary}
-                    </p>
                   </div>
-                </div>
-
-                {/* Footer Action Buttons */}
-                <div className="p-5 pt-0">
-                  <div className="border-t border-gray-100 pt-3 flex items-center justify-between gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setActiveVideoArticle(article)}
-                      className="text-xs font-bold text-red-600 hover:text-red-700 flex items-center gap-1"
-                    >
-                      <Play className="w-3.5 h-3.5 fill-current" />
-                      <span>Video Demo</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setActiveDetailArticle(article)}
-                      className="bg-[#1d5f41] hover:bg-[#14432e] text-white text-xs font-bold px-3 py-1.5 rounded-lg transition shadow-sm flex items-center gap-1"
-                    >
-                      <span>Full Advisory</span>
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              </article>
-            </StaggerItem>
-          ))}
-        </Stagger>
-
-      </main>
-
-      {/* ══════════════════════════════════════════════════════════
-          VIDEO MODAL PLAYER
-      ══════════════════════════════════════════════════════════ */}
-      <AnimatePresence>
-        {activeVideoArticle && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-            <Motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-2xl overflow-hidden max-w-3xl w-full shadow-2xl border border-gray-200"
-            >
-              <div className="bg-[#14432e] p-4 text-white flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Video className="w-5 h-5 text-red-400" />
-                  <h3 className="font-bold text-sm sm:text-base truncate">
-                    {activeVideoArticle.videoTitle}
-                  </h3>
-                </div>
-                <button
-                  onClick={() => setActiveVideoArticle(null)}
-                  className="p-1 hover:bg-white/20 rounded-lg transition text-white"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* Video Player Box */}
-              <div className="aspect-video w-full bg-black">
-                <iframe
-                  src={`${activeVideoArticle.videoUrl}?autoplay=1`}
-                  title={activeVideoArticle.videoTitle}
-                  className="w-full h-full border-0"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                />
-              </div>
-
-              <div className="p-5 bg-gray-50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
-                <div>
-                  <p className="font-bold text-gray-900">{activeVideoArticle.title}</p>
-                  <p className="text-gray-500 mt-0.5">Source: {activeVideoArticle.source} · {activeVideoArticle.date}</p>
-                </div>
-                <button
-                  onClick={() => {
-                    const article = activeVideoArticle;
-                    setActiveVideoArticle(null);
-                    setActiveDetailArticle(article);
-                  }}
-                  className="bg-[#1d5f41] text-white px-4 py-2 rounded-lg font-bold shrink-0 hover:bg-[#14432e] transition"
-                >
-                  Read Full Circular
-                </button>
-              </div>
-            </Motion.div>
+                </article>
+              </StaggerItem>
+            ))}
+          </Stagger>
+        ) : (
+          <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center">
+            <Search className="mx-auto h-8 w-8 text-slate-400" />
+            <h3 className="mt-4 text-lg font-bold">No updates found</h3>
+            <p className="mt-2 text-sm text-slate-500">Try another search or choose a different topic.</p>
+            <button type="button" onClick={resetFilters} className="btn-primary mt-6">Show all updates</button>
           </div>
         )}
-      </AnimatePresence>
-
-      {/* ══════════════════════════════════════════════════════════
-          ARTICLE DETAIL MODAL WITH FULL TEXT & ATTACHMENTS
-      ══════════════════════════════════════════════════════════ */}
-      <AnimatePresence>
-        {activeDetailArticle && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
-            <Motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 20 }}
-              className="bg-white rounded-2xl overflow-hidden max-w-2xl w-full shadow-2xl border border-gray-200 my-8"
-            >
-              {/* Header */}
-              <div className="bg-[#14432e] p-5 text-white flex items-start justify-between">
-                <div>
-                  <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-md ${activeDetailArticle.tagColor}`}>
-                    {activeDetailArticle.categoryLabel}
-                  </span>
-                  <h3 className="font-bold text-base sm:text-lg mt-2 leading-snug">
-                    {activeDetailArticle.title}
-                  </h3>
-                  <p className="text-xs text-white/80 mt-1">
-                    {activeDetailArticle.source} · {activeDetailArticle.date}
-                  </p>
-                </div>
-                <button
-                  onClick={() => setActiveDetailArticle(null)}
-                  className="p-1 hover:bg-white/20 rounded-lg transition text-white shrink-0 ml-3"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* Body */}
-              <div className="p-6 space-y-4 max-h-[65vh] overflow-y-auto">
-                <img
-                  src={activeDetailArticle.image}
-                  alt={activeDetailArticle.title}
-                  className="w-full h-52 object-cover rounded-xl border border-gray-200"
-                />
-
-                <div className="bg-green-50 border border-green-200 p-4 rounded-xl text-xs text-green-900 leading-relaxed font-medium">
-                  <strong>Summary:</strong> {activeDetailArticle.summary}
-                </div>
-
-                <div className="text-xs sm:text-sm text-gray-700 leading-relaxed whitespace-pre-line space-y-2">
-                  {activeDetailArticle.description}
-                </div>
-              </div>
-
-              {/* Footer */}
-              <div className="p-4 bg-gray-50 border-t border-gray-200 flex items-center justify-between text-xs">
-                <button
-                  onClick={() => {
-                    const article = activeDetailArticle;
-                    setActiveDetailArticle(null);
-                    setActiveVideoArticle(article);
-                  }}
-                  className="text-red-600 font-bold hover:underline flex items-center gap-1.5"
-                >
-                  <Play className="w-4 h-4 fill-current" />
-                  <span>Watch Explainer Video</span>
-                </button>
-
-                <button
-                  onClick={() => setActiveDetailArticle(null)}
-                  className="bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold px-4 py-2 rounded-lg transition"
-                >
-                  Close
-                </button>
-              </div>
-            </Motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
+      </section>
+      {activeArticle && <ArticleReader article={activeArticle} onClose={() => setActiveArticle(null)} />}
     </PageMotion>
   );
 }

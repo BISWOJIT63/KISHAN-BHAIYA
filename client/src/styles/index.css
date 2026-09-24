@@ -363,3 +363,21 @@ textarea:focus-visible {
     text-align: left;
   }
 }
+
+.ux4g-accessibility-button {
+  border-color: #a7f3d0;
+  background: #ecfdf5;
+  color: #064e3b;
+}
+.ux4g-accessibility-button:hover {
+  background: #d1fae5;
+  color: #064e3b;
+}
+.ux4g-accessibility-button[aria-pressed="true"] {
+  border-color: #fde047;
+  background: #fde047;
+  color: #171717;
+}
+.ux4g-accessibility-button[aria-pressed="true"]:hover {
+  background: #fef08a;
+}
