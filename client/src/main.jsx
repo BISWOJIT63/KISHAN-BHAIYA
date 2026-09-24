@@ -7,6 +7,7 @@ import "./styles/index.css";
 import "./i18n/index.js";
 import App from "./App.jsx";
 import RealtimeBridge from "./components/RealtimeBridge.jsx";
+import DynamicTranslatorBridge from "./components/DynamicTranslatorBridge.jsx";
 import AppToaster from "./components/AppToaster.jsx";
 
 const queryClient = new QueryClient({
@@ -20,6 +21,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <RealtimeBridge />
+        <DynamicTranslatorBridge />
         <App />
       </BrowserRouter>
       <AppToaster />

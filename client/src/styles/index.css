@@ -381,3 +381,28 @@ textarea:focus-visible {
 .ux4g-accessibility-button[aria-pressed="true"]:hover {
   background: #fef08a;
 }
+
+/* Dynamic Real-time Translation Clean Styling */
+.goog-te-banner-frame,
+.goog-te-banner-frame.skiptranslate,
+iframe.goog-te-banner-frame {
+  display: none !important;
+  visibility: hidden !important;
+  height: 0 !important;
+}
+body {
+  top: 0px !important;
+  position: static !important;
+}
+#goog-gt-tt,
+.goog-te-balloon-frame {
+  display: none !important;
+}
+.goog-text-highlight {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+#google_translate_element {
+  display: none !important;
+}
+

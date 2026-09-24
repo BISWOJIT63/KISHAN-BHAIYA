@@ -1,17 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../store/useAppStore.js";
 import { cx } from "../utils/format.js";
-
-const languages = [
-  { code: "en", label: "English", short: "ENG" },
-  { code: "hi", label: "हिन्दी", short: "हिन्दी" },
-  { code: "or", label: "ଓଡ଼ିଆ", short: "ଓଡ଼ିଆ" },
-  { code: "ta", label: "தமிழ்", short: "தமிழ்" },
-  { code: "te", label: "తెలుగు", short: "తెలుగు" },
-  { code: "bn", label: "বাংলা", short: "বাংলা" },
-  { code: "kn", label: "ಕನ್ನಡ", short: "ಕನ್ನಡ" },
-  { code: "mr", label: "मराठी", short: "मराठी" },
-];
+import { SUPPORTED_LANGUAGES as languages, applyDynamicTranslation } from "../services/translator.js";
 
 /**
  * Official India.gov.in / Bhashini Indic Translation Icon
@@ -53,6 +43,7 @@ export default function LanguageSwitcher({
   const changeLanguage = (next) => {
     setLanguage(next);
     i18n.changeLanguage(next);
+    applyDynamicTranslation(next);
   };
 
   if (variant === "utility") {

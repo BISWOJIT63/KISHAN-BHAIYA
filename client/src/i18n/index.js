@@ -473,10 +473,22 @@ const mr = {
 
 const language = localStorage.getItem("kishan-bhaiya-language") || "en";
 i18n.use(initReactI18next).init({
-  resources: { en: { translation: en }, hi: { translation: hi }, or: { translation: or }, ta: { translation: ta }, te: { translation: te }, bn: { translation: bn }, kn: { translation: kn }, mr: { translation: mr } },
+  resources: {
+    en: { translation: en },
+    hi: { translation: hi },
+    or: { translation: or },
+    ta: { translation: ta },
+    te: { translation: te },
+    bn: { translation: bn },
+    kn: { translation: kn },
+    mr: { translation: mr },
+    gu: { translation: hi },
+    pa: { translation: hi },
+    ml: { translation: ta },
+  },
   lng: language,
   fallbackLng: "en",
-  supportedLngs: ["en", "hi", "or", "ta", "te", "bn", "kn", "mr"],
+  supportedLngs: ["en", "hi", "or", "ta", "te", "bn", "kn", "mr", "gu", "pa", "ml"],
   keySeparator: false,
   interpolation: { escapeValue: false },
 });
