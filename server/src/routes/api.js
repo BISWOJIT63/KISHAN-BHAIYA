@@ -1,3 +1,8 @@
+import { historicalPriceForecast } from "../services/demandForecasting.js";
+import { roadRoute } from "../services/roadRoute.js";
+import { randomUUID } from "node:crypto";
+import { sameCommodity } from "../../../shared/produce.js";
+import { seasonalDemand, festivalScenarios } from "../services/seasonalDemand.js";
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
@@ -12,6 +17,10 @@ import {
   fetchMandiBenchmarks,
   priceRecommendation,
 } from "../services/priceIntelligence.js";
+import {
+  buildForecastDataset,
+  generateDemandForecast,
+} from "../services/demandForecasting.js";
 import { reverseIndiaLocation } from "../services/geocoding.js";
 import { providers } from "../providers/index.js";
 import { asyncHandler, HttpError, ok } from "../utils/http.js";
@@ -967,6 +976,7 @@ router.use(
         /^\/sellers(?:\/|$)/,
         /^\/quality-passports(?:\/|$)/,
         /^\/price-intelligence(?:\/|$)/,
+        /^\/(?:demand-forecast|seasonal-demand)$/,
       ].some((pattern) => pattern.test(req.path));
     if (publicBrowse) return next();
     const user = await store.get("users", req.user.sub);
@@ -1135,7 +1145,7 @@ router.post(
       "products",
       {
         ...req.body,
-        slug: req.body.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+        slug: `${req.body.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${randomUUID().slice(0, 8)}`,
         sellerId: seller.id,
         seller,
         unit: "kg",
@@ -1339,6 +1349,33 @@ router.get(
   asyncHandler(async (req, res) => {
     req.url = `/products?q=${encodeURIComponent(req.query.q || "")}`;
     router.handle(req, res);
+  }),
+);
+router.get('/seasonal-demand', asyncHandler(async (req, res) => {
+  const period = req.query.period || 'current';
+  const festival = req.query.festival || 'Durga Puja / Dussehra';
+  if (!['current', 'upcoming', 'festival'].includes(period) || !Object.hasOwn(festivalScenarios, festival)) throw new HttpError(400, 'Choose a valid season or festival');
+  ok(res, seasonalDemand({ requirements: await store.list('requirements'), period, festival }));
+}));
+router.post('/routing/road', requireAuth, validate(z.object({ points: z.array(z.tuple([z.number().min(-180).max(180), z.number().min(-90).max(90)])).min(2).max(25) })), asyncHandler(async (req, res) => {
+  try { ok(res, await roadRoute(req.body.points)); }
+  catch { throw new HttpError(503, 'Road routing is unavailable. Stop markers are shown; please retry.'); }
+}));
+router.get(
+  "/demand-forecast",
+  asyncHandler(async (_req, res) => {
+    const [products, priceSnapshots, requirements, lots] = await Promise.all([
+      store.list("products", { status: "active" }),
+      store.list("priceSnapshots"),
+      store.list("requirements"),
+      store.list("lots"),
+    ]);
+    const dataset = buildForecastDataset({ products, priceSnapshots, requirements, lots });
+    try { ok(res, await generateDemandForecast(dataset)); }
+    catch (error) {
+      if (!dataset.products.length) throw error;
+      ok(res, historicalPriceForecast(dataset));
+    }
   }),
 );
 router.get(
@@ -2222,6 +2259,17 @@ router.post(
     }
     if (harvest.status === "CONVERTED")
       throw new HttpError(409, "This harvest has already been converted");
+    const catalog = await store.list("products");
+    let linkedProduct = catalog.find(product => product.sellerId === harvest.sellerId && sameCommodity(product.name, harvest.product));
+    if (!linkedProduct) linkedProduct = await store.create("products", {
+      name: harvest.product, slug: randomUUID(), sellerId: harvest.sellerId,
+      category: harvest.category || "Produce", unit: harvest.unit || "kg", status: "active",
+      retailPrice: harvest.minimumPrice, bulkPrice: harvest.minimumPrice,
+      availableQuantity: harvest.expectedQuantity - harvest.reservedQuantity,
+      minimumOrder: 1, bulkThreshold: 100, grade: harvest.grade,
+      locationName: harvest.location, image: fallbackProduceImage,
+    }, "prod");
+    harvest.productId = linkedProduct._id;
     const lot = await store.create(
       "lots",
       {
@@ -2246,6 +2294,7 @@ router.post(
     await store.update("expectedHarvests", harvest._id, {
       status: "CONVERTED",
       convertedLotId: lot._id,
+      productId: harvest.productId,
     });
     await store.create(
       "auditLogs",

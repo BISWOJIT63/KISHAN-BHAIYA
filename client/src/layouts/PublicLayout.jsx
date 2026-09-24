@@ -1,4 +1,5 @@
-import { Outlet } from 'react-router-dom';
+import DashboardLayout from './DashboardLayout.jsx';
+import { Outlet, useLocation } from 'react-router-dom';
 import Navbar from '../components/Navbar.jsx';
 import Footer from '../components/Footer.jsx';
 import { OfflineBanner } from '../components/UI.jsx';
@@ -8,8 +9,10 @@ import GuidedTour from '../components/GuidedTour.jsx';
 import { useAppStore } from '../store/useAppStore.js';
 
 export default function PublicLayout() {
+  const { pathname } = useLocation();
   const online = useOnlineStatus();
   const lowBandwidth = useAppStore((s) => s.lowBandwidth);
+  if (pathname.startsWith('/admin')) return <DashboardLayout />;
   return (
     // pb-20 clears the taller mobile tab bar so footer content is never hidden.
     <div className={`min-h-screen pb-20 md:pb-0 ${lowBandwidth ? 'low-bandwidth' : ''}`}>

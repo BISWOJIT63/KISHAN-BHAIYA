@@ -1,3 +1,4 @@
+import { produceNames } from "../../../shared/produce.js";
 import {
   ArrowRight,
   BarChart3,
@@ -251,7 +252,7 @@ export function NewRequirementPage() {
   } = useForm({
     resolver: zodResolver(requirementSchema),
     defaultValues: {
-      product: "Fresh Desi Tomato",
+      product: "",
       category: "Vegetables",
       unit: "kg",
       quality: "A",
@@ -269,12 +270,6 @@ export function NewRequirementPage() {
       const data = await getData(
         api.post("/bulk-requirements", {
           ...values,
-          productId: {
-            "Fresh Desi Tomato": "prod-tomato",
-            "Jyoti Potato": "prod-potato",
-            "Nasik Red Onion": "prod-onion",
-            "Aromatic Gobindobhog Rice": "prod-rice",
-          }[values.product],
           targetPrice: values.targetPrice || undefined,
         }),
       );
@@ -307,13 +302,7 @@ export function NewRequirementPage() {
         <section className="card space-y-6 p-6 sm:p-8">
           <div className="grid gap-5 sm:grid-cols-2">
             <Field label="Product" error={errors.product?.message}>
-              <select className="input" {...register("product")}>
-                <option>Fresh Desi Tomato</option>
-                <option>Jyoti Potato</option>
-                <option>Nasik Red Onion</option>
-                <option>Aromatic Gobindobhog Rice</option>
-                <option>Green Chili</option>
-              </select>
+              <input className="input" list="buyer-produce" placeholder="Choose or type any fruit or vegetable" {...register("product")} /><datalist id="buyer-produce">{produceNames.map(name => <option key={name} value={name} />)}</datalist>
             </Field>
             <Field label="Category">
               <select className="input" {...register("category")}>

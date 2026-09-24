@@ -106,7 +106,7 @@ All endpoints live under `/api/v1` and respond as `{ success, data, meta? }` or 
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Auth         | `POST /auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout`; `GET/PATCH /auth/me`; profile image upload/removal                                          |
 | Verification | `GET /auth/verification`, `POST /auth/verification/documents`, `/auth/verification/submit`; `GET /admin/verifications`, `PATCH /admin/verifications/:id/review`    |
-| Marketplace  | `GET/POST /products`, `GET /products/:id/related`, `GET /sellers/:id`, `GET /lots`, `/marketplace/surplus`, `/price-intelligence/:productId`                       |
+| Marketplace  | `GET/POST /products`, `GET /products/:id/related`, `GET /sellers/:id`, `GET /lots`, `/marketplace/surplus`, `/price-intelligence/:productId`, `/demand-forecast`   |
 | Uploads      | Public/profile images use validated JPG/PNG/WebP up to 5 MB; verification evidence uses private PDF/image storage up to 10 MB and never exposes file keys publicly |
 | Retail       | `POST /orders`, `GET /orders`, `GET /orders/:id`                                                                                                                   |
 | Procurement  | `GET/POST /bulk-requirements`, `GET /:id/matches`, `GET/POST /:id/quotations`                                                                                      |
@@ -125,6 +125,7 @@ Mutation routes use Zod validation where structured input is required, role chec
 
 - Payment: Razorpay test boundary when keys exist; otherwise labelled `Mock payment provider`.
 - Routing: OpenRouteService-style boundary when configured; otherwise labelled nearest-neighbour development estimate with explicit assumptions.
+- Demand forecasting: OpenAI structured output generated from stored price history, available supply, freshness pressure and active buyer requirements; cached for 15 minutes and labelled as advisory.
 - Pricing: seeded 30-day local/reference history behind an adapter. No government website scraping.
 - Weather: configured provider boundary; otherwise seeded advisory data explicitly marked advisory.
 - Images: Cloudinary-ready boundary; otherwise validated local development uploads.
@@ -141,3 +142,11 @@ npm run lint
 ```
 
 Tests cover multi-seller coverage/explanations, FEFO split reservations, capacity-safe automatic trips, enforced route order, protected fleet actions, demo authentication, server-side order calculation, producer purchasing permissions, pending-account restrictions, admin approval/audit transitions, private document metadata, plaintext-password prevention, profile editing and cart threshold behaviour. The PWA caches the app shell and safe read-only imagery; IndexedDB stores farmer listing drafts. It never claims an order, payment or reservation succeeded while offline.
+
+## General crop and seasonal planning
+
+Buyer requirements, farmer listings and expected harvests accept general crop names or custom produce, without a fixed variety list. Bulk requirement locations are stored as text; coordinates remain a separate field.
+
+The demand page defaults to `/api/v1/seasonal-demand`, with current-season, upcoming-season and explicitly selected festival scenarios. These are labelled rule-based planning suggestions, not a trained seasonal demand forecast or a verified festival calendar. Open, unexpired buyer requirements are counted separately as supporting evidence; the page does not invent forecast quantities. Existing AI marketplace price projections remain available in an optional panel and still require provider configuration.
+
+Marketplace price projections now display a loading state through API requests and retries. If AI forecasting is unavailable, the API returns a labelled historical-price extrapolation with no AI confidence claim; Refresh retries the provider. Protected pages validate the current account before redirecting, and transient connection failures offer Retry without clearing the saved session. Public forecast reads are available to pending applicants; operational approval restrictions remain enforced.

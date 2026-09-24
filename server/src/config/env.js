@@ -16,7 +16,8 @@ export const env = {
   mandiPriceApiUrl: process.env.MANDI_PRICE_API_URL || '',
   dataGovApiKey: process.env.DATA_GOV_API_KEY || '',
   openAiApiKey: process.env.OPENAI_API_KEY || '',
-  routeProvider: process.env.ROUTE_PROVIDER || 'local',
+  openAiForecastModel: process.env.OPENAI_FORECAST_MODEL || 'gpt-4o-mini',
+  routeProvider: process.env.ROUTE_PROVIDER || 'osrm',
   osrmBaseUrl: (process.env.OSRM_BASE_URL || 'https://router.project-osrm.org').replace(/\/+$/, ''),
   /** Absolute origin this API is reachable at, used to build image URLs. Falls back to the request host. */
   publicUrl: (process.env.PUBLIC_API_URL || '').replace(/\/+$/, ''),

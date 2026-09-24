@@ -29,7 +29,7 @@ import SmartImage from "./SmartImage.jsx";
 import { EmptyState } from "./UI.jsx";
 import UserAvatar from "./UserAvatar.jsx";
 import AccessibilityToolbar from "./AccessibilityToolbar.jsx";
-export default function Navbar() {
+export default function Navbar({ sidebarNavigation = false }) {
   const navigate = useNavigate(),
     { t } = useTranslation(),
     queryClient = useQueryClient();
@@ -82,7 +82,7 @@ export default function Navbar() {
             viewport. Anything added here must be hidden below `md`. */}
         <div className="container-page flex h-[72px] items-center gap-2 sm:gap-4">
           <Logo />
-          <nav className="ml-2 hidden min-w-0 items-center gap-0.5 lg:flex xl:ml-4 xl:gap-1">
+          {!sidebarNavigation && <nav aria-label="Primary navigation" className="ml-2 hidden min-w-0 items-center gap-0.5 lg:flex xl:ml-4 xl:gap-1">
             {nav.map(([label, to]) => {
               const [Icon, iconColor] = navIconFor(label);
               return (
@@ -105,7 +105,7 @@ export default function Navbar() {
                 </NavLink>
               );
             })}
-          </nav>
+          </nav>}
           <div className="ml-auto flex shrink-0 items-center gap-0.5 sm:gap-1.5">
             {shoppingEnabled && <button type="button" className="btn-ghost hidden max-w-52 px-2 xl:flex" onClick={() => navigate("/profile")} title="Change delivery location in profile settings">
               <MapPin className="h-4 w-4 text-forest-600" />
@@ -179,7 +179,7 @@ export default function Navbar() {
                     >
                       {t("nav.profile")}
                     </Link>
-                    {user.role === "admin" && (
+                    {user.role === "admin" && !sidebarNavigation && (
                       <Link
                         className="btn-ghost w-full justify-start"
                         to="/admin"

@@ -1,3 +1,4 @@
+import { sameCommodity } from "../../../shared/produce.js";
 const weights = { landedPrice: .30, distance: .20, coverage: .20, reliability: .15, freshness: .10, quality: .05 };
 const radians = (d) => d * Math.PI / 180;
 export const distanceKm = (a, b) => {
@@ -8,6 +9,11 @@ export const distanceKm = (a, b) => {
 };
 
 export function scoreCandidates(requirement, products, lots) {
+  if (!requirement._specificProduct) {
+    const matches = products.filter(p => requirement.productId === p._id || sameCommodity(p.name, requirement.product));
+    const candidates = matches.flatMap(p => scoreCandidates({ ...requirement, productId: p._id, product: p.name, _specificProduct: true }, [p], lots));
+    return candidates.sort((a, b) => b.score - a.score).filter((candidate, index, all) => all.findIndex(item => item.sellerId === candidate.sellerId) === index);
+  }
   const product=products.find((p)=>p._id===requirement.productId || p.name===requirement.product);
   if(!product) return [];
   const eligibleLots=lots.filter(l=>l.productId===product._id && !['EXPIRED','UNAVAILABLE'].includes(l.freshnessState));

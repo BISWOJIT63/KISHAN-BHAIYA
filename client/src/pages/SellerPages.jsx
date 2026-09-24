@@ -1,3 +1,4 @@
+import { produceNames } from "../../../shared/produce.js";
 import {
   AlertTriangle,
   ArrowRight,
@@ -592,9 +593,9 @@ export function ProductFormPage() {
             <FormField label="Product name" error={errors.name?.message}>
               <input
                 className="input"
-                placeholder="e.g. Fresh tomato"
+                list="farmer-produce" placeholder="Choose or type any fruit or vegetable"
                 {...register("name")}
-              />
+              /><datalist id="farmer-produce">{produceNames.map(name => <option key={name} value={name} />)}</datalist>
             </FormField>
             <FormField label="Category">
               <select className="input" {...register("category")}>
@@ -1030,8 +1031,7 @@ export function HarvestsPage() {
   } = useForm({
     resolver: zodResolver(harvestFormSchema),
     defaultValues: {
-      product: "Fresh Desi Tomato",
-      productId: "prod-tomato",
+      product: "",
       expectedQuantity: 2500,
       expectedHarvestDate: dateAfter(14),
       grade: "A",
@@ -1170,11 +1170,7 @@ export function HarvestsPage() {
           className="grid gap-4 sm:grid-cols-2"
         >
           <FormField label="Crop">
-            <select className="input" {...register("product")}>
-              <option>Fresh Desi Tomato</option>
-              <option>Dasheri Mango</option>
-              <option>Fresh Cauliflower</option>
-            </select>
+            <input className="input" list="harvest-produce" placeholder="Choose or type any crop" {...register("product")} /><datalist id="harvest-produce">{produceNames.map(name => <option key={name} value={name} />)}</datalist>
           </FormField>
           <FormField label="Expected quantity" error={errors.expectedQuantity?.message}>
             <input

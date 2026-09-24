@@ -45,6 +45,18 @@ export function optimizeRoute(stops = [], vehicle = {}, options = {}) {
   appendNearest(ordered, other);
   appendNearest(ordered, deliveries);
 
+  // Shorten detours without moving completed stops or crossing pickup/hub/delivery stages.
+  for (let pass = 0; pass < 3; pass++) {
+    let improved = false;
+    for (let start = Math.max(1, completed.length); start < ordered.length - 1; start++) {
+      for (let end = start + 1; end < ordered.length; end++) {
+        if (ordered.slice(start, end + 1).some(stop => stop.type !== ordered[start].type)) break;
+        const candidate = [...ordered.slice(0, start), ...ordered.slice(start, end + 1).reverse(), ...ordered.slice(end + 1)];
+        if (pathDistance(candidate) + 0.001 < pathDistance(ordered)) { ordered.splice(0, ordered.length, ...candidate); improved = true; }
+      }
+    }
+    if (!improved) break;
+  }
   let nextAssigned = false;
   const sequencedStops = ordered.map((stop, index) => {
     let status = stop.status;
@@ -74,7 +86,7 @@ export function optimizeRoute(stops = [], vehicle = {}, options = {}) {
     estimatedFuelLitres: Number((distance / (vehicle.coldChain ? 8 : 12)).toFixed(1)),
     capacityExceeded: Boolean(vehicle.capacity && Number(vehicle.load || 0) > Number(vehicle.capacity)),
     nextStop: sequencedStops.find((stop) => stop.status === "NEXT") || null,
-    provider: "KISHAN BHAIYA constrained route estimate (automatic nearest-neighbour)",
+    provider: "KISHAN BHAIYA constrained route estimate (nearest-neighbour with constrained detour reduction)",
     assumptions: "Completed stops stay fixed; pickups precede hubs and deliveries; average speed 32 km/h plus 18 minutes handling per intermediate stop",
     routeOptimization: {
       version: 2,

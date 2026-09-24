@@ -4,5 +4,6 @@ export const providers = {
   weather: { name: process.env.WEATHER_API_KEY ? 'Configured weather adapter' : 'Seeded advisory provider', configured: Boolean(process.env.WEATHER_API_KEY) },
   pricing: { name: process.env.MANDI_PRICE_API_URL && process.env.DATA_GOV_API_KEY ? 'Configured mandi price provider' : 'KISHAN BHAIYA seeded reference provider', configured: Boolean(process.env.MANDI_PRICE_API_URL && process.env.DATA_GOV_API_KEY) },
   speech: { name: process.env.OPENAI_API_KEY ? 'OpenAI speech adapter' : 'Browser speech recognition fallback', configured: Boolean(process.env.OPENAI_API_KEY) },
+  forecasting: { name: process.env.OPENAI_API_KEY ? `OpenAI ${process.env.OPENAI_FORECAST_MODEL || 'gpt-4o-mini'}` : 'Not configured', configured: Boolean(process.env.OPENAI_API_KEY) },
   uploads: { name: process.env.CLOUDINARY_CLOUD_NAME ? 'Cloudinary adapter' : 'Local development uploads', configured: Boolean(process.env.CLOUDINARY_CLOUD_NAME) }
 };

@@ -18,7 +18,7 @@ export const enrichRouteWithOsrm = async (route) => {
   const timeout = setTimeout(() => controller.abort(), 3500);
   try {
     const response = await fetch(
-      `${env.osrmBaseUrl}/route/v1/driving/${coordinates}?overview=false`,
+      `${env.osrmBaseUrl}/route/v1/driving/${coordinates}?overview=full&geometries=geojson`,
       { signal: controller.signal, headers: { Accept: "application/json" } },
     );
     if (!response.ok) return route;
@@ -27,6 +27,7 @@ export const enrichRouteWithOsrm = async (route) => {
     if (!result || !Number.isFinite(result.distance) || !Number.isFinite(result.duration)) return route;
     return {
       ...route,
+      geometry: result.geometry,
       distance: Number((result.distance / 1000).toFixed(1)),
       duration: Math.round(result.duration / 60),
       estimatedFuelLitres: Number(((result.distance / 1000) / 12).toFixed(1)),
@@ -65,7 +66,7 @@ export const liveRouteEstimate = async (coordinates, stops = []) => {
   const timeout = setTimeout(() => controller.abort(), 3500);
   try {
     const response = await fetch(
-      `${env.osrmBaseUrl}/route/v1/driving/${routeCoordinates}?overview=false`,
+      `${env.osrmBaseUrl}/route/v1/driving/${routeCoordinates}?overview=full&geometries=geojson`,
       { signal: controller.signal, headers: { Accept: "application/json" } },
     );
     if (!response.ok) return null;
@@ -73,6 +74,7 @@ export const liveRouteEstimate = async (coordinates, stops = []) => {
     if (!route || !Number.isFinite(route.distance) || !Number.isFinite(route.duration))
       return null;
     return {
+      geometry: route.geometry,
       remainingDistance: Number((route.distance / 1000).toFixed(1)),
       remainingDuration: Math.max(1, Math.round(route.duration / 60)),
       provider: "OSRM live road-route estimate",

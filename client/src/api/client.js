@@ -48,7 +48,7 @@ api.interceptors.response.use(
       error.response?.status === 401 &&
       original &&
       !original._retry &&
-      !isAuthRequest
+      (!isAuthRequest || original.allowAuthRefresh)
     ) {
       original._retry = true;
       try {
@@ -73,8 +73,9 @@ api.interceptors.response.use(
         original.headers = original.headers || {};
         original.headers.Authorization = `Bearer ${accessToken}`;
         return api(original);
-      } catch {
-        useAppStore.getState().clearSession();
+      } catch (refreshError) {
+        if ([401, 403].includes(refreshError.response?.status)) useAppStore.getState().clearSession();
+        return Promise.reject(refreshError);
       }
     }
 
@@ -89,15 +90,15 @@ api.interceptors.response.use(
 export const getData = (promise) => promise.then(responseData);
 
 export const apiError = (error) => {
-  const details = error.response?.data?.error?.details;
+  const details = error?.response?.data?.error?.details;
   const fieldErrors = details?.fieldErrors || {};
   const firstFieldError = Object.values(fieldErrors)
     .flat()
     .find(Boolean);
   return (
     firstFieldError ||
-    error.response?.data?.error?.message ||
-    error.message ||
+    error?.response?.data?.error?.message ||
+    error?.message ||
     "Something went wrong"
   );
 };

@@ -1,3 +1,4 @@
+import { sameCommodity } from "../../../shared/produce.js";
 import { z } from "zod";
 import { nanoid } from "nanoid";
 import { store } from "../services/dataStore.js";
@@ -94,10 +95,13 @@ export function registerBulkProcurementRoutes(router) {
     allowRoles("business_buyer"),
     validate(requirementSchema),
     asyncHandler(async (req, res) => {
+      const catalog = await store.list("products");
+      const selected = catalog.find(product => sameCommodity(product.name, req.body.product));
       const requirement = await store.create(
         "requirements",
         {
           ...req.body,
+          productId: selected?._id,
           buyerId: req.user.sub,
           buyer: req.user.name,
           status: "OPEN",
@@ -289,7 +293,7 @@ export function registerBulkProcurementRoutes(router) {
           )
             .filter(
               (l) =>
-                l.productId === requirement.productId &&
+                l.productId === allocation.productId &&
                 l.availableQuantity > 0,
             )
             .sort((a, b) => new Date(a.expiryDate) - new Date(b.expiryDate));
@@ -690,7 +694,7 @@ export function registerBulkProcurementRoutes(router) {
         )
           .filter(
             (l) =>
-              l.productId === requirement.productId && l.availableQuantity > 0,
+              (l.productId === requirement.productId || sameCommodity(l.product, requirement.product)) && l.availableQuantity > 0,
           )
           .sort((a, b) => new Date(a.expiryDate) - new Date(b.expiryDate));
         const available = lots.reduce((n, l) => n + l.availableQuantity, 0);

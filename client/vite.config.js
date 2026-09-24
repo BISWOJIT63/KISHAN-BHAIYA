@@ -43,6 +43,6 @@ export default defineConfig({
       }
     }
   },
-  server: { port: 5173, proxy: { '/api': 'http://localhost:5000', '/uploads': 'http://localhost:5000', '/socket.io': { target: 'http://localhost:5000', ws: true } } },
+  server: { port: 5173, proxy: { '/api': 'http://127.0.0.1:5000', '/uploads': 'http://127.0.0.1:5000', '/socket.io': { target: 'http://127.0.0.1:5000', ws: true } } },
   test: { environment: 'jsdom', setupFiles: './src/test-setup.js' }
 });
